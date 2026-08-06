@@ -1,0 +1,22 @@
+{
+    "name": "@digital-net-org/secure-npm",
+    "version": "1.0.0",
+    "private": true,
+    "description": "Supply-chain guard rails around npm and pnpm. Rejects every other JS package manager.",
+    "type": "module",
+    "license": "MIT",
+    "engines": {
+        "node": ">=20.6.0"
+    },
+    "bin": {
+        "secure-npm": "./bin/secure-npm.mjs"
+    },
+    "scripts": {
+        "install-shims": "node ./install.mjs",
+        "uninstall-shims": "node ./uninstall.mjs",
+        "doctor": "node ./bin/secure-npm.mjs --self doctor",
+        "test": "node --test test/"
+    },
+    "dependencies": {},
+    "devDependencies": {}
+}

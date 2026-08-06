@@ -1,0 +1,51 @@
+{
+    "$comment": [
+        "Shared policy, versioned so every machine enforces the same rules.",
+        "Machine-specific overrides go in policy.local.json (git-ignored), which is",
+        "shallow-merged on top of this file. Run `secure-npm --self doctor` after editing."
+    ],
+
+    "minimumReleaseAgeMinutes": 4320,
+
+    "minimumReleaseAgeExclude": [],
+
+    "allowExoticSources": false,
+
+    "forceIgnoreScripts": true,
+
+    "$trustPolicyComment": [
+        "pnpm-only, and enforced natively by pnpm: refuses a version published with",
+        "weaker guarantees (provenance, trusted publisher) than an earlier one, which",
+        "is what a stolen publish token looks like. The comparison is by publish date",
+        "rather than semver, so a backport onto an old branch trips it; the ignore-after",
+        "window keeps the check on the recent releases where the risk actually is."
+    ],
+    "trustPolicy": "no-downgrade",
+    "trustPolicyIgnoreAfterMinutes": 129600,
+
+    "blockedManagers": [
+        { "command": "bun", "reason": "bun is not an approved package manager on this machine" },
+        { "command": "bunx", "reason": "bun is not an approved package manager on this machine" },
+        { "command": "yarn", "reason": "yarn is not an approved package manager on this machine" },
+        { "command": "yarnpkg", "reason": "yarn is not an approved package manager on this machine" },
+        { "command": "deno", "reason": "deno is not an approved package manager on this machine" }
+    ],
+
+    "blockedPackages": [
+        { "pattern": "^bun$", "reason": "bun runtime" },
+        { "pattern": "^bunx$", "reason": "bun runner" },
+        { "pattern": "^@oven/", "reason": "bun platform binaries" },
+        { "pattern": "^bun-(darwin|linux|windows)", "reason": "bun platform binaries" },
+        { "pattern": "^yarn$", "reason": "yarn package manager" },
+        { "pattern": "^@yarnpkg/cli-dist$", "reason": "yarn package manager" },
+        { "pattern": "^deno$", "reason": "deno runtime" },
+        { "pattern": "^@deno/", "reason": "deno platform binaries" }
+    ],
+
+    "registries": {
+        "default": "https://registry.npmjs.org/",
+        "@jsr": "https://npm.jsr.io/"
+    },
+
+    "logRetentionDays": 90
+}
