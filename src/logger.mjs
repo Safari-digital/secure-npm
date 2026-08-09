@@ -7,16 +7,9 @@
 
 import fs from 'node:fs';
 import { auditLogFile, logDir } from './paths.mjs';
+import { styleFor } from './style.mjs';
 
-const COLOR_ENABLED = process.stderr.isTTY && !process.env.NO_COLOR && process.env.TERM !== 'dumb';
-
-const ESC = '\u001b[';
-const paint = (code, text) => (COLOR_ENABLED ? `${ESC}${code}m${text}${ESC}0m` : text);
-const dim = text => paint('2', text);
-const bold = text => paint('1', text);
-const red = text => paint('31', text);
-const green = text => paint('32', text);
-const yellow = text => paint('33', text);
+const { dim, bold, red, green, yellow } = styleFor(process.stderr);
 
 const TAG = 'secure-npm';
 // Lines up with the "<glyph> secure-npm  " prefix of the headline above them.

@@ -21,6 +21,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { loadPolicy } from './src/policy.mjs';
+import { columns, styleFor } from './src/style.mjs';
 import {
     IS_WINDOWS,
     binDir,
@@ -42,47 +43,56 @@ const flags = new Set(process.argv.slice(2));
 const wantsPath = flags.has('--set-path');
 const force = flags.has('--force');
 
+const { dim, bold, yellow } = styleFor(process.stdout);
+
 const done = [];
 const notes = [];
 
-function report(message) {
-    done.push(message);
+/** One row of the final report. `depth` indents the label, never the value. */
+function report(label, value, depth = 0) {
+    done.push({ label, value, depth });
 }
 
 /* ------------------------------------------------------------------ shims */
 
-function posixShim(manager) {
+function posixShim(route) {
     return `#!/bin/sh
 # ${MANAGED_MARKER} — do not edit, regenerate with "node install.mjs"
-exec node "${entryPoint}" ${manager} "$@"
+exec node "${entryPoint}" ${route} "$@"
 `;
 }
 
-function windowsCmdShim(manager) {
+function windowsCmdShim(route) {
     return `@ECHO OFF\r
 REM ${MANAGED_MARKER} — do not edit, regenerate with "node install.mjs"\r
 SETLOCAL\r
-node "${entryPoint}" ${manager} %*\r
+node "${entryPoint}" ${route} %*\r
 EXIT /B %ERRORLEVEL%\r
 `;
 }
 
-function windowsPowerShellShim(manager) {
+function windowsPowerShellShim(route) {
     return `#!/usr/bin/env pwsh
 # ${MANAGED_MARKER} — do not edit, regenerate with "node install.mjs"
-node "${entryPoint}" ${manager} @args
+node "${entryPoint}" ${route} @args
 exit $LASTEXITCODE
 `;
 }
 
-function writeShim(manager) {
+/**
+ * `route` is the first argument handed to the entry point, which is what tells
+ * it what it is being asked to do. For a package manager that is the name that
+ * was typed; for the tool's own command it is `--self`, so that a package
+ * manager one day called "doctor" could never shadow `secure-npm doctor`.
+ */
+function writeShim(name, route = name) {
     // The extensionless script is written on Windows too: Git Bash and MSYS
     // resolve it, and they are how most Windows Node work actually happens.
-    fs.writeFileSync(path.join(binDir, manager), posixShim(manager), { mode: 0o755 });
+    fs.writeFileSync(path.join(binDir, name), posixShim(route), { mode: 0o755 });
 
     if (IS_WINDOWS) {
-        fs.writeFileSync(path.join(binDir, `${manager}.cmd`), windowsCmdShim(manager));
-        fs.writeFileSync(path.join(binDir, `${manager}.ps1`), windowsPowerShellShim(manager));
+        fs.writeFileSync(path.join(binDir, `${name}.cmd`), windowsCmdShim(route));
+        fs.writeFileSync(path.join(binDir, `${name}.ps1`), windowsPowerShellShim(route));
     }
 }
 
@@ -97,10 +107,12 @@ function installShims(policy) {
     const refused = [...policy.blockedManagers.keys()];
 
     for (const manager of [...wrapped, ...refused]) writeShim(manager);
+    writeShim('secure-npm', '--self');
 
-    report(`shims        ${binDir}`);
-    report(`  wrapped    ${wrapped.join(', ')}`);
-    report(`  refused    ${refused.join(', ')}`);
+    report('shims', binDir);
+    report('wrapped', wrapped.join(', '), 1);
+    report('refused', refused.join(', '), 1);
+    report('tool', 'secure-npm', 1);
 }
 
 /* ------------------------------------------------------- pnpm global config */
@@ -157,7 +169,7 @@ function installPnpmConfig(policy) {
     }
 
     fs.writeFileSync(file, pnpmConfigContents(policy));
-    report(`pnpm config  ${file}`);
+    report('pnpm config', file);
 }
 
 /* -------------------------------------------------------------- npm config */
@@ -193,7 +205,7 @@ function installNpmrc() {
 ignore-scripts=true`
     );
 
-    report(`npm config   ${file} (${action})`);
+    report('npm config', `${file} ${dim(`(${action})`)}`);
 }
 
 /* -------------------------------------------------------------------- PATH */
@@ -224,7 +236,7 @@ function installPathWindows() {
     const entries = current.split(';').filter(Boolean);
 
     if (entries.some(entry => path.resolve(entry).toLowerCase() === path.resolve(binDir).toLowerCase())) {
-        report('PATH         already contains the shim directory');
+        report('PATH', `already contains the shim directory ${dim('(unchanged)')}`);
         return;
     }
 
@@ -234,8 +246,8 @@ function installPathWindows() {
     // setx is deliberately avoided: it truncates PATH at 1024 characters.
     setWindowsUserPath([binDir, ...entries].join(';'));
 
-    report(`PATH         shim directory prepended to the user PATH`);
-    report(`  backup     ${backup}`);
+    report('PATH', `shim directory prepended to the user PATH ${dim('(updated)')}`);
+    report('backup', backup, 1);
     notes.push('open a new terminal for the PATH change to take effect');
 }
 
@@ -253,7 +265,7 @@ ${BLOCK_END}`;
 
     for (const file of targets) {
         upsertManagedBlock(file, body.split('\n').slice(1, -1).join('\n'));
-        report(`PATH         ${file}`);
+        report('PATH', file);
     }
 
     notes.push('open a new shell, or source the file above, for the PATH change to take effect');
@@ -264,8 +276,6 @@ ${BLOCK_END}`;
 function main() {
     const policy = loadPolicy();
 
-    process.stdout.write(`\nsecure-npm installer — ${installRoot}\n\n`);
-
     installShims(policy);
     installPnpmConfig(policy);
     installNpmrc();
@@ -273,12 +283,23 @@ function main() {
     if (wantsPath) {
         IS_WINDOWS ? installPathWindows() : installPathPosix();
     } else {
-        notes.push(`PATH was not modified. Re-run with --set-path, or add this first on PATH: ${binDir}`);
+        notes.push(`PATH was left alone — re-run with --set-path, or put ${binDir} first on PATH yourself`);
     }
 
-    process.stdout.write(`${done.join('\n')}\n\n`);
-    for (const note of notes) process.stdout.write(`  note: ${note}\n`);
-    process.stdout.write(`\nNext: secure-npm doctor\n\n`);
+    // Notes and the closing line share the grid rather than sitting outside it,
+    // so the whole report has one label column and one value column.
+    const rows = [
+        { label: 'source', value: installRoot },
+        ...done,
+        ...notes.map(note => ({ label: 'note', value: note })),
+        { label: 'next', value: bold('secure-npm doctor') },
+    ];
+
+    const lines = columns(rows, label => (label.trimEnd() === 'note' ? yellow(label) : dim(label)));
+    const sections = [lines.slice(0, 1), lines.slice(1, 1 + done.length), lines.slice(1 + done.length)];
+
+    process.stdout.write(`\n${bold('secure-npm installer')}\n\n`);
+    process.stdout.write(`${sections.map(section => section.join('\n')).join('\n\n')}\n\n`);
 }
 
 main();

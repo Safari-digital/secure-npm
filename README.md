@@ -66,12 +66,12 @@ And when a rule fires, it says which one, on what, and why and then records it:
 `bun`, `yarn` and `deno` are shimmed too, and refuse to run at all.
 
 ### Additional commands
-> The tool's own commands are not shimmed, run them from the clone:
+> The tool ships its own shim, so these work from anywhere:
 
 ```bash
-node bin/secure-npm.mjs doctor      # check that the guard rails are actually wired up
-node bin/secure-npm.mjs log 20      # recent audit entries
-node bin/secure-npm.mjs policy      # the effective policy, after the local overlay
+secure-npm doctor      # check that the guard rails are actually wired up
+secure-npm log 20      # recent audit entries
+secure-npm policy      # the effective policy, after the local overlay
 ```
 
 ## Configuration

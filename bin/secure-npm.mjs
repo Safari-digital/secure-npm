@@ -18,31 +18,42 @@ import { runSelfCommand } from '../src/self.mjs';
 const NPM_FAMILY = new Set(['npm', 'npx']);
 const PNPM_FAMILY = new Set(['pnpm', 'pnpx']);
 
+const SELF_COMMANDS = ['doctor', 'log', 'policy', 'version'];
+
 const USAGE = `secure-npm — supply-chain guard rails for npm and pnpm
 
   secure-npm doctor            check that the guard rails are actually wired up
   secure-npm log [count]       show the most recent audit entries
   secure-npm policy            print the effective policy
-  secure-npm <manager> [args]  run a package manager through the guard rails
+  secure-npm version           print the version and the install root
 
-Normally you do not run this directly: the shims installed by install.mjs do.
+npm, npx, pnpm and pnpx are shimmed onto PATH by install.mjs and route through
+the guard rails on their own — there is nothing to prefix with this command.
 `;
+
+const HELP_FLAGS = new Set(['--help', '-h', undefined]);
 
 async function main() {
     const [invoked, ...argv] = process.argv.slice(2);
     const cwd = process.cwd();
 
-    if (!invoked || invoked === '--help' || invoked === '-h') {
+    if (HELP_FLAGS.has(invoked)) {
         process.stdout.write(USAGE);
         return 0;
     }
 
-    // `--self doctor` is how the shims reach the self commands without
-    // shadowing a package manager that might one day be called "doctor".
-    const selfCommand = invoked === '--self' ? argv[0] : invoked;
-    if (['doctor', 'log', 'policy', 'version'].includes(selfCommand)) {
-        return runSelfCommand(selfCommand, invoked === '--self' ? argv.slice(1) : argv);
+    // `--self doctor` is how the secure-npm shim reaches these without a
+    // package manager one day called "doctor" being able to shadow them.
+    if (invoked === '--self') {
+        const [selfCommand, ...rest] = argv;
+        if (SELF_COMMANDS.includes(selfCommand)) return runSelfCommand(selfCommand, rest);
+
+        if (!HELP_FLAGS.has(selfCommand)) process.stderr.write(`secure-npm: unknown command "${selfCommand}"\n\n`);
+        process.stdout.write(USAGE);
+        return HELP_FLAGS.has(selfCommand) ? 0 : 2;
     }
+
+    if (SELF_COMMANDS.includes(invoked)) return runSelfCommand(invoked, argv);
 
     const policy = loadPolicy();
     maybePruneAuditLog(policy.logRetentionDays);
