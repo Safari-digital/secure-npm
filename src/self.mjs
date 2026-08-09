@@ -14,6 +14,7 @@ import { spawnSync } from 'node:child_process';
 import { loadPolicy } from './policy.mjs';
 import { pruneAuditLog } from './logger.mjs';
 import { runtimeStatus } from './runtime.mjs';
+import { columns } from './style.mjs';
 import { compromisedCacheStatus } from './compromised.mjs';
 import { runValidate } from './validate.mjs';
 import { findManager } from './which.mjs';
@@ -48,6 +49,38 @@ function pathContainsBinDir() {
         .some(entry => path.resolve(entry.replace(/^"|"$/g, '')).toLowerCase() === target);
 }
 
+/** Version declared by a tree's package.json, or null when there is none to read. */
+function packageVersion(root) {
+    try {
+        return JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version ?? null;
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Which version is actually installed.
+ *
+ * Resolved at install time from the repository's package.json and recorded in
+ * the stamp, so it is the version the shims and the pnpm hook are running —
+ * which is not necessarily the version of the clone this command was started
+ * from. When the two differ, the clone is ahead and nothing on the machine
+ * knows about it yet.
+ */
+function reportVersion() {
+    const running = packageVersion(moduleRoot);
+    const { stamp } = runtimeStatus();
+
+    if (!stamp?.version) {
+        line(MEH, 'version', `${running ?? 'unknown'} here — nothing is installed yet`);
+        return;
+    }
+
+    stamp.version === running
+        ? line(OK, 'version', `${stamp.version} installed`)
+        : line(MEH, 'version', `${stamp.version} installed, ${running ?? 'unknown'} in this working copy`);
+}
+
 /**
  * The deployed runtime is the one thing here with no equivalent of its own
  * error message: a copy that has fallen behind its source enforces yesterday's
@@ -72,7 +105,7 @@ function reportRuntime(fail) {
         return;
     }
 
-    line(OK, 'runtime deployed', `${runtimeRoot} (v${stamp.version}, ${stamp.deployedAt})`);
+    line(OK, 'runtime deployed', `${runtimeRoot} (${stamp.deployedAt})`);
     state === 'source-gone'
         ? line(MEH, 'runtime source', `no longer at ${stamp.source} — updates cannot be checked`)
         : line(OK, 'runtime source', stamp.source);
@@ -116,6 +149,7 @@ function doctor() {
 
     process.stdout.write(`\nsecure-npm doctor — running from ${moduleRoot}\n\n`);
 
+    reportVersion();
     reportRuntime(fail);
 
     fs.existsSync(policyFile) ? line(OK, 'policy file', policyFile) : fail('policy file', `missing: ${policyFile}`);
@@ -269,7 +303,17 @@ function showPolicy() {
 function showVersion() {
     const require = createRequire(import.meta.url);
     const { name, version } = require(path.join(moduleRoot, 'package.json'));
-    process.stdout.write(`${name} ${version}\n  root ${moduleRoot}\n  entry ${entryPoint}\n`);
+    const { stamp } = runtimeStatus();
+
+    // Two versions, because they are two different things: what this command is
+    // running from, and what the shims and the pnpm hook load on every install.
+    const rows = [
+        { label: 'root', value: moduleRoot },
+        { label: 'entry', value: entryPoint },
+        { label: 'installed', value: stamp?.version ? `${stamp.version} (${stamp.deployedAt})` : 'nothing deployed' },
+    ];
+
+    process.stdout.write(`${name} ${version}\n${columns(rows).join('\n')}\n`);
     return 0;
 }
 
