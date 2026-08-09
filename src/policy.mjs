@@ -57,6 +57,11 @@ function compile(raw) {
         forceIgnoreScripts: raw.forceIgnoreScripts !== false,
         trustPolicy: raw.trustPolicy ?? 'no-downgrade',
         trustPolicyIgnoreAfterMinutes: raw.trustPolicyIgnoreAfterMinutes ?? 129600,
+        // An empty source is how the check is switched off, the way a zero
+        // minimumReleaseAge switches off the age check.
+        compromisedPackagesSource: raw.compromisedPackagesSource || null,
+        compromisedPackagesRefreshMinutes: raw.compromisedPackagesRefreshMinutes ?? 360,
+        compromisedPackagesMaxStaleMinutes: raw.compromisedPackagesMaxStaleMinutes ?? 10080,
         blockedPackages,
         blockedManagers,
         registries: raw.registries ?? { default: 'https://registry.npmjs.org/' },

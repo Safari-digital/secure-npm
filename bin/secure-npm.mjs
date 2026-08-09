@@ -18,10 +18,11 @@ import { runSelfCommand } from '../src/self.mjs';
 const NPM_FAMILY = new Set(['npm', 'npx']);
 const PNPM_FAMILY = new Set(['pnpm', 'pnpx']);
 
-const SELF_COMMANDS = ['doctor', 'edit-policy', 'log', 'policy', 'version'];
+const SELF_COMMANDS = ['doctor', 'edit-policy', 'log', 'policy', 'validate', 'version'];
 
 const USAGE = `secure-npm — supply-chain guard rails for npm and pnpm
 
+  secure-npm validate [path]   audit an existing tree against the malicious-package list
   secure-npm doctor            check that the guard rails are actually wired up
   secure-npm edit-policy       open this machine's policy overlay, creating it if needed
   secure-npm log [count]       show the most recent audit entries

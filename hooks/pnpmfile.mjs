@@ -2,16 +2,21 @@
  * pnpm resolution hook — wired up by `globalPnpmfile` in pnpm's global config.
  *
  * pnpm calls `readPackage` on every manifest it resolves, before anything is
- * downloaded, so throwing here aborts the install. This covers the one rule
- * pnpm has no setting for: rejecting a package by name, at any depth.
+ * downloaded, so throwing here aborts the install. This covers the two rules
+ * pnpm has no setting for: rejecting a package by name, and rejecting a release
+ * that is known to be malicious — both at any depth.
  *
  * It runs inside pnpm's own process, whether pnpm was started through the
- * shim or called directly, which makes it the backstop for both.
+ * shim or called directly, which makes it the backstop for both. pnpm awaits
+ * the hook, so the malicious-package list can be fetched from here; it is
+ * loaded on the first package rather than at import time, because pnpm loads
+ * this file for commands that resolve nothing at all.
  */
 
 import { audit, banner, reportBlock } from '../src/logger.mjs';
 import { loadPolicy } from '../src/policy.mjs';
 import { localPolicyFile, policyFile } from '../src/paths.mjs';
+import { compromisedListViolation, compromisedReason, loadCompromisedList } from '../src/compromised.mjs';
 import {
     INSTALLED_FIELDS,
     blockedPackageReason,
@@ -53,8 +58,26 @@ function refuse({ rule, subject, reason, hint, origin }) {
     throw error;
 }
 
-function readPackage(pkg) {
+async function readPackage(pkg) {
     const origin = pkg.name ? `${pkg.name}@${pkg.version ?? '?'}` : 'the local project';
+
+    const list = await loadCompromisedList(policy);
+    const unavailable = compromisedListViolation(list);
+    if (unavailable) refuse({ ...unavailable, origin });
+
+    // The only place a sub-dependency's exact version is ever seen: the lockfile
+    // check in the wrapper reads what is already pinned, this reads what is
+    // about to be.
+    const selfMalicious = compromisedReason(list.index, pkg.name, pkg.version);
+    if (selfMalicious) {
+        refuse({
+            rule: 'compromised-package',
+            subject: origin,
+            reason: selfMalicious,
+            hint: 'this package is on the malicious-package list — remove it, do not pin around it',
+            origin,
+        });
+    }
 
     // Catches the package itself whatever field pulled it in, including
     // devDependencies of the local project, which is what `pnpm add -D` writes.
@@ -69,10 +92,24 @@ function readPackage(pkg) {
     for (const field of INSTALLED_FIELDS) {
         for (const [key, specifier] of Object.entries(pkg[field] ?? {})) {
             const name = resolveName(key, specifier);
+            const alias = name === key ? '' : ` (aliased as "${key}")`;
+
+            // By name only — a dependency declares a range, not a version. The
+            // exact one is checked above, once pnpm resolves it. Refusing here
+            // as well is what names the package that asked for it.
+            const malicious = compromisedReason(list.index, name);
+            if (malicious) {
+                refuse({
+                    rule: 'compromised-package',
+                    subject: `${name}${alias}, required by ${origin} ▸ ${field}`,
+                    reason: malicious,
+                    hint: 'this package is on the malicious-package list — remove it, do not pin around it',
+                    origin,
+                });
+            }
 
             const reason = blockedPackageReason(policy, name);
             if (reason) {
-                const alias = name === key ? '' : ` (aliased as "${key}")`;
                 refuse({
                     rule: 'blocked-package',
                     subject: `${name}${alias}, required by ${origin} ▸ ${field}`,

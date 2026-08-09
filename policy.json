@@ -37,6 +37,21 @@
     "trustPolicy": "no-downgrade",
     "trustPolicyIgnoreAfterMinutes": 129600,
 
+    "$compromisedPackagesComment": [
+        "Curated list of npm packages that are known to be malicious, maintained by",
+        "DataDog. Names on it are refused at any depth, on both managers, and",
+        "'secure-npm validate' audits an existing tree against the same list.",
+        "https://github.com/DataDog/malicious-software-packages-dataset",
+        "",
+        "The list is cached, and refreshed once it is older than the refresh window.",
+        "When a refresh fails the cached copy is used and announced, up to the",
+        "max-stale window; past that an install is refused rather than run",
+        "unchecked. Setting the source to \"\" switches the check off entirely."
+    ],
+    "compromisedPackagesSource": "https://raw.githubusercontent.com/DataDog/malicious-software-packages-dataset/refs/heads/main/samples/npm/manifest.json",
+    "compromisedPackagesRefreshMinutes": 360,
+    "compromisedPackagesMaxStaleMinutes": 10080,
+
     "blockedManagers": [
         { "command": "bun", "reason": "bun is not an approved package manager on this machine" },
         { "command": "bunx", "reason": "bun is not an approved package manager on this machine" },

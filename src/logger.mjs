@@ -27,8 +27,8 @@ function emit(line) {
  * Printed before the wrapped command starts, so it is always visible which
  * policy an install ran under — including when it ran under none.
  */
-export function banner({ command, policyFiles, hookFile, extras = {} }) {
-    emit(`${green('▸')} ${bold(TAG)}  Securely running ${bold(command)}`);
+export function banner({ command, policyFiles, hookFile, action = 'Securely running', extras = {} }) {
+    emit(`${green('▸')} ${bold(TAG)}  ${action} ${bold(command)}`);
     emit(field('policy', policyFiles.join(dim(' + '))));
     if (hookFile) emit(field('hook', hookFile));
     for (const [label, value] of Object.entries(extras)) emit(field(label, value));

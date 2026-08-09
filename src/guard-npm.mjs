@@ -26,6 +26,7 @@ import {
     isExoticResolution,
     registryFor,
 } from './rules.mjs';
+import { compromisedReason } from './compromised.mjs';
 import { mapWithConcurrency, resolvePublishDate } from './registry.mjs';
 
 const PREVIEW_TIMEOUT_MS = 180_000;
@@ -85,7 +86,8 @@ export function previewResolution({ manager, argv, cwd }) {
 }
 
 /**
- * Blocked names and immature releases across a resolved package set.
+ * Known-malicious releases, blocked names and immature releases across a
+ * resolved package set.
  *
  * `gitSourced` names are exempt from the age check and from it alone. A package
  * taken from a whitelisted repository has no registry publish date, and the
@@ -94,14 +96,30 @@ export function previewResolution({ manager, argv, cwd }) {
  * which is worse than not checking. The name is the unit here rather than
  * name@version, because npm's dry-run report is all the wrapper has to go on
  * before anything is written.
+ *
+ * @param {Object|null} compromised The malicious-package list, or null when the
+ *   policy configures none.
  */
-export async function inspectPackages(policy, packages, gitSourced = new Set()) {
+export async function inspectPackages(policy, packages, { gitSourced = new Set(), compromised = null } = {}) {
     const violations = [];
     const cutoffMs = Date.now() - policy.minimumReleaseAgeMinutes * 60 * 1000;
 
     const needAgeCheck = [];
 
     for (const { name, version } of packages) {
+        // First, and with no exemption of any kind: this is the one rule that
+        // names a release rather than weighing a risk about it.
+        const malicious = compromisedReason(compromised, name, version);
+        if (malicious) {
+            violations.push({
+                rule: 'compromised-package',
+                subject: `${name}@${version}`,
+                reason: malicious,
+                hint: 'this package is on the malicious-package list — remove it, do not pin around it',
+            });
+            continue;
+        }
+
         const reason = blockedPackageReason(policy, name);
         if (reason) {
             violations.push({ rule: 'blocked-package', subject: `${name}@${version}`, reason });
@@ -218,10 +236,11 @@ export function lockfilePackages(cwd) {
 
 /**
  * Second pass over the lockfile npm just wrote. The dry-run report gives names
- * and versions but not where each one came from, so exotic resolutions are only
+ * and versions but not where each one came from, so exotic resolutions — and a
+ * compromised release recognisable only by the tarball it points at — are only
  * visible here.
  */
-export function inspectLockfile(policy, cwd) {
+export function inspectLockfile(policy, cwd, compromised = null) {
     const { lockFile, lock, error } = readLockfile(cwd);
     if (error) return [{ rule: 'unreadable-lockfile', subject: lockFile, reason: error.message }];
     if (!lock) return [];
@@ -233,6 +252,17 @@ export function inspectLockfile(policy, cwd) {
 
         const name = nameFromLockKey(key, entry);
         if (!name) continue;
+
+        const malicious = compromisedReason(compromised, name, entry?.version, entry?.resolved ?? '');
+        if (malicious) {
+            violations.push({
+                rule: 'compromised-package',
+                subject: `${name}@${entry?.version ?? '?'} — ${key}`,
+                reason: malicious,
+                hint: 'this package is on the malicious-package list — remove it, do not pin around it',
+            });
+            continue;
+        }
 
         const reason = blockedPackageReason(policy, name);
         if (reason) {

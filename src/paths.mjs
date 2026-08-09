@@ -89,6 +89,9 @@ export const cacheDir = IS_WINDOWS
 
 export const packumentCacheDir = path.join(cacheDir, 'packuments');
 
+/** The malicious-package list, kept whole rather than per package. */
+export const compromisedCacheFile = path.join(cacheDir, 'compromised-packages.json');
+
 /**
  * pnpm's own config directory. Mirrors `getConfigDir` in pnpm's source — if
  * pnpm ever moves it, `secure-npm --self doctor` reports the mismatch.

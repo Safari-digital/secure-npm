@@ -28,6 +28,7 @@ const INSTALL_COMMANDS = {
     ]),
     pnpm: new Set([
         'install', 'i', 'add', 'update', 'up', 'upgrade', 'import',
+        'ci', 'clean-install', 'ic', 'install-clean', 'install-test', 'it',
         'link', 'ln', 'fetch', 'dedupe', 'rebuild', 'rb',
     ]),
 };
@@ -44,6 +45,8 @@ const INERT_COMMANDS = new Set([
     'audit', 'why', 'config', 'c', 'set', 'get', 'login', 'logout', 'whoami', 'ping',
     'help', 'root', 'bin', 'prefix', 'store', 'licenses', 'env', 'deploy', 'patch',
     'uninstall', 'remove', 'rm', 'un', 'unlink', 'r',
+    'clean', 'prune', 'approve-builds', 'ignored-builds', 'patch-commit', 'patch-remove',
+    'cat-file', 'cat-index', 'find-hash', 'runtime', 'rt', 'self-update', 'cache', 'doctor', 'init',
 ]);
 
 /**

@@ -7,18 +7,23 @@
  *
  *   - make the active policy visible on every run,
  *   - refuse command-line flags that would switch that policy off,
- *   - check the manifest for block-listed packages, which is the one rule pnpm
- *     has no setting for (the hook covers the rest of the tree),
+ *   - check the manifest for block-listed and known-malicious packages, which is
+ *     the one rule pnpm has no setting for (the hook covers the rest of the tree),
+ *   - check the lockfile for the same, because an install that has nothing to
+ *     resolve never reaches the hook,
  *   - shout if the global config has gone missing, because pnpm would then run
  *     with no policy at all and say nothing.
  */
 
 import fs from 'node:fs';
-import { audit, banner, warn } from './logger.mjs';
+import { audit, banner, checked, warn } from './logger.mjs';
 import { loadPolicy } from './policy.mjs';
 import { abort, delegate } from './execute.mjs';
 import { classify, inspectArgv } from './guard-argv.mjs';
 import { inspectManifest } from './guard-manifest.mjs';
+import { inspectPnpmLockfile } from './guard-pnpm.mjs';
+import { compromisedListSummary, compromisedListViolation, loadCompromisedList } from './compromised.mjs';
+import { PNPM_LOCK_FILE } from './lockfile.mjs';
 import { findManager } from './which.mjs';
 import { localPolicyFile, pnpmConfigFile, pnpmHookFile, policyFile } from './paths.mjs';
 
@@ -63,8 +68,23 @@ export async function runPnpm({ command, argv, cwd }) {
     if (argvViolations.length) return abort({ ...context, phase: 'argv', violations: argvViolations });
 
     if (isInstall) {
-        const manifestViolations = inspectManifest(policy, cwd);
+        const list = await loadCompromisedList(policy);
+        const listViolation = compromisedListViolation(list);
+        if (listViolation) return abort({ ...context, phase: 'compromised-list', violations: [listViolation] });
+
+        const manifestViolations = inspectManifest(policy, cwd, list.index);
         if (manifestViolations.length) return abort({ ...context, phase: 'manifest', violations: manifestViolations });
+
+        const { violations: lockViolations, count } = inspectPnpmLockfile(policy, cwd, list.index);
+        if (lockViolations.length) return abort({ ...context, phase: 'lockfile', violations: lockViolations });
+
+        // Said out loud even when nothing was refused: a guard that only speaks
+        // to refuse is, on every run that passes, indistinguishable from one
+        // that was never wired up. With no lockfile there is nothing pinned yet
+        // and the hook checks the tree instead, as pnpm resolves it.
+        const summary = compromisedListSummary(list);
+        const subject = count ? `${count} package(s) in ${PNPM_LOCK_FILE}` : 'package.json';
+        if (summary) checked(`${subject} cleared the malicious-package list (${summary})`);
     }
 
     audit({ event: 'run', command, argv, cwd });

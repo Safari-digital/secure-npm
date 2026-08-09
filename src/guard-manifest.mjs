@@ -17,6 +17,7 @@ import {
     isExoticSpecifier,
     resolveName,
 } from './rules.mjs';
+import { compromisedReason } from './compromised.mjs';
 
 const FIELDS = ['dependencies', 'devDependencies', 'optionalDependencies'];
 
@@ -52,7 +53,13 @@ export function gitSourcedManifestNames(cwd) {
     return names;
 }
 
-export function inspectManifest(policy, cwd) {
+/**
+ * @param {Object|null} compromised The malicious-package list. Checked by name
+ *   alone here: a manifest declares ranges, and only an entry covering every
+ *   published version of a package says anything certain about a range. The
+ *   exact versions get checked once they have been resolved.
+ */
+export function inspectManifest(policy, cwd, compromised = null) {
     const { manifestFile, manifest, error } = readManifest(cwd);
     if (error) {
         return [
@@ -70,10 +77,21 @@ export function inspectManifest(policy, cwd) {
     for (const field of FIELDS) {
         for (const [key, specifier] of Object.entries(manifest[field] ?? {})) {
             const name = resolveName(key, specifier);
+            const alias = name === key ? '' : ` (aliased as "${key}")`;
+
+            const malicious = compromisedReason(compromised, name);
+            if (malicious) {
+                violations.push({
+                    rule: 'compromised-package',
+                    subject: `${name}${alias} — package.json ▸ ${field}`,
+                    reason: malicious,
+                    hint: 'this package is on the malicious-package list — remove it from package.json',
+                });
+                continue;
+            }
 
             const reason = blockedPackageReason(policy, name);
             if (reason) {
-                const alias = name === key ? '' : ` (aliased as "${key}")`;
                 violations.push({
                     rule: 'blocked-package',
                     subject: `${name}${alias} — package.json ▸ ${field}`,

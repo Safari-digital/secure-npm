@@ -1,5 +1,5 @@
 /**
- * `secure-npm doctor | edit-policy | log | policy | version`.
+ * `secure-npm doctor | edit-policy | log | policy | validate | version`.
  *
  * doctor exists because every layer here fails open when it is not wired up:
  * a shim that is not on PATH, a pnpm config that was overwritten, an .npmrc
@@ -14,6 +14,8 @@ import { spawnSync } from 'node:child_process';
 import { loadPolicy } from './policy.mjs';
 import { pruneAuditLog } from './logger.mjs';
 import { runtimeStatus } from './runtime.mjs';
+import { compromisedCacheStatus } from './compromised.mjs';
+import { runValidate } from './validate.mjs';
 import { findManager } from './which.mjs';
 import {
     IS_WINDOWS,
@@ -76,6 +78,34 @@ function reportRuntime(fail) {
         : line(OK, 'runtime source', stamp.source);
 }
 
+/**
+ * The malicious-package list, reported from the cache alone: doctor says what
+ * is wired up, and going to the network to answer that would turn a missing
+ * connection into a failed check rather than a stale one.
+ */
+function reportCompromisedList(policy, fail) {
+    const { source, cached } = compromisedCacheStatus(policy);
+
+    if (!source) {
+        line(MEH, 'malicious-package list', 'off — "compromisedPackagesSource" is not set in policy.json');
+        return;
+    }
+
+    if (!cached) {
+        line(MEH, 'malicious-package list', `${source} (not fetched yet — the next install fetches it)`);
+        return;
+    }
+
+    const ageHours = Math.round((Date.now() - cached.fetchedAt) / 3_600_000);
+    const detail = `${cached.count} package(s), fetched ${ageHours}h ago`;
+
+    // Past the stale window an install is refused outright, so it is a failure
+    // here rather than a note: the machine is one offline moment from blocking.
+    ageHours * 60 > policy.compromisedPackagesMaxStaleMinutes
+        ? fail('malicious-package list', `${detail} — older than the max-stale window, installs will be refused`)
+        : line(OK, 'malicious-package list', detail);
+}
+
 function doctor() {
     const policy = loadPolicy();
     let failures = 0;
@@ -100,6 +130,8 @@ function doctor() {
     );
     line(OK, 'blocked managers', [...policy.blockedManagers.keys()].join(', ') || 'none');
     line(OK, 'blocked packages', `${policy.blockedPackages.length} pattern(s)`);
+
+    reportCompromisedList(policy, fail);
 
     // Worth naming rather than counting: these are the only sources allowed in
     // without a publish date behind them.
@@ -220,6 +252,9 @@ function showPolicy() {
                 allowExoticSources: policy.allowExoticSources,
                 allowedGitSources: policy.allowedGitSources.map(({ source }) => source),
                 forceIgnoreScripts: policy.forceIgnoreScripts,
+                compromisedPackagesSource: policy.compromisedPackagesSource,
+                compromisedPackagesRefreshMinutes: policy.compromisedPackagesRefreshMinutes,
+                compromisedPackagesMaxStaleMinutes: policy.compromisedPackagesMaxStaleMinutes,
                 blockedManagers: Object.fromEntries(policy.blockedManagers),
                 blockedPackages: policy.blockedPackages.map(({ source, reason }) => ({ pattern: source, reason })),
                 registries: policy.registries,
@@ -335,6 +370,8 @@ export function runSelfCommand(command, argv) {
             return showLog(argv);
         case 'policy':
             return showPolicy();
+        case 'validate':
+            return runValidate(argv);
         case 'version':
             return showVersion();
         default:

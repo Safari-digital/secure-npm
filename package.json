@@ -15,7 +15,7 @@
         "install-shims": "node ./install.mjs",
         "uninstall-shims": "node ./uninstall.mjs",
         "doctor": "node ./bin/secure-npm.mjs --self doctor",
-        "test": "node --test test/"
+        "test": "node --test"
     },
     "dependencies": {},
     "devDependencies": {}

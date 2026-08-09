@@ -11,6 +11,12 @@ import { abort, delegate } from './execute.mjs';
 import { classify, inspectArgv } from './guard-argv.mjs';
 import { gitSourcedManifestNames, inspectManifest } from './guard-manifest.mjs';
 import { inspectLockfile, inspectPackages, lockfilePackages, previewResolution } from './guard-npm.mjs';
+import {
+    compromisedListSummary,
+    compromisedListViolation,
+    compromisedReason,
+    loadCompromisedList,
+} from './compromised.mjs';
 import { resolveDistTag } from './registry.mjs';
 import { registryFor } from './rules.mjs';
 import { findManager } from './which.mjs';
@@ -66,16 +72,34 @@ export async function runNpm({ command, argv, cwd }) {
     const argvViolations = inspectArgv(policy, command, argv);
     if (argvViolations.length) return abort({ ...context, phase: 'argv', violations: argvViolations });
 
+    // Only fetched for the commands that bring code in: `npm run build` has no
+    // business waiting on a network request.
+    const list = isInstall || isExec ? await loadCompromisedList(policy) : { index: null, reason: null };
+    const listViolation = compromisedListViolation(list);
+    if (listViolation) return abort({ ...context, phase: 'compromised-list', violations: [listViolation] });
+
+    const compromised = list.index;
+
+    // One line per cleared set, naming both checks rather than one: "it passed"
+    // is only worth reading next to what it passed against.
+    const summary = compromisedListSummary(list);
+    const cleared = subject =>
+        checked(
+            summary
+                ? `${subject} cleared the policy and the malicious-package list (${summary})`
+                : `${subject} cleared the policy`
+        );
+
     if (isInstall) {
-        const manifestViolations = inspectManifest(policy, cwd);
+        const manifestViolations = inspectManifest(policy, cwd, compromised);
         if (manifestViolations.length) return abort({ ...context, phase: 'manifest', violations: manifestViolations });
     }
 
     if (isExec && targets.length) {
         const { resolved, violations } = await resolveExecTargets(policy, targets);
-        const packageViolations = [...violations, ...(await inspectPackages(policy, resolved))];
+        const packageViolations = [...violations, ...(await inspectPackages(policy, resolved, { compromised }))];
         if (packageViolations.length) return abort({ ...context, phase: 'exec-target', violations: packageViolations });
-        if (resolved.length) checked(`${resolved.map(p => `${p.name}@${p.version}`).join(', ')} cleared the policy`);
+        if (resolved.length) cleared(resolved.map(p => `${p.name}@${p.version}`).join(', '));
     }
 
     // `npm ci` reinstalls the whole lockfile, and its dry-run report says
@@ -85,13 +109,18 @@ export async function runNpm({ command, argv, cwd }) {
         const { packages: pinned, gitSourced } = lockfilePackages(cwd);
         info(`checking the ${pinned.length} package(s) pinned in package-lock.json…`);
 
-        const violations = [
-            ...inspectLockfile(policy, cwd),
-            ...(await inspectPackages(policy, pinned, gitSourced)),
-        ];
+        // The malicious-package list is checked by the lockfile pass alone: both
+        // passes walk the same entries here, and only that one knows the install
+        // path each of them sits at. A package it has already refused is then
+        // kept out of the age check — a second rule firing on a package that is
+        // not going to be installed either way only buries the first one.
+        const lockViolations = inspectLockfile(policy, cwd, compromised);
+        const candidates = pinned.filter(({ name, version }) => !compromisedReason(compromised, name, version));
+
+        const violations = [...lockViolations, ...(await inspectPackages(policy, candidates, { gitSourced }))];
         if (violations.length) return abort({ ...context, phase: 'lockfile', violations });
 
-        checked(`${pinned.length} pinned package(s) cleared the policy`);
+        cleared(`${pinned.length} package(s) pinned in package-lock.json`);
     } else if (isInstall) {
         info('asking npm what it would install (dry run, nothing is written)…');
         const preview = await previewResolution({ manager, argv, cwd });
@@ -113,6 +142,9 @@ export async function runNpm({ command, argv, cwd }) {
 
         if (preview.packages.length === 0) {
             info('nothing new to resolve');
+            // package.json still went past the list, and the lockfile sweep
+            // below reads the rest of the tree once npm is done.
+            if (summary) checked(`package.json cleared the malicious-package list (${summary})`);
         } else {
             // Whitelisted git sources cleared the argv and manifest guards
             // above; the age check must not then judge them by the registry.
@@ -121,11 +153,11 @@ export async function runNpm({ command, argv, cwd }) {
                 ...targets.map(target => target.gitName).filter(Boolean),
             ]);
 
-            const packageViolations = await inspectPackages(policy, preview.packages, gitSourced);
+            const packageViolations = await inspectPackages(policy, preview.packages, { gitSourced, compromised });
             if (packageViolations.length) {
                 return abort({ ...context, phase: 'resolution', violations: packageViolations });
             }
-            checked(`${preview.packages.length} resolved package(s) cleared the policy`);
+            cleared(`${preview.packages.length} resolved package(s)`);
         }
     }
 
@@ -142,7 +174,7 @@ export async function runNpm({ command, argv, cwd }) {
     // Post-install sweep: the dry-run report carries no resolution URLs, so a
     // git or tarball dependency further down the tree is only visible now.
     if (isInstall && code === 0) {
-        const lockViolations = inspectLockfile(policy, cwd);
+        const lockViolations = inspectLockfile(policy, cwd, compromised);
         if (lockViolations.length) {
             warn('the install finished before these were found — no scripts ran, but review node_modules');
             return abort({ ...context, phase: 'lockfile', violations: lockViolations });
