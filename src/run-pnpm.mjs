@@ -21,8 +21,9 @@ import { loadPolicy } from './policy.mjs';
 import { abort, delegate } from './execute.mjs';
 import { classify, inspectArgv, unknownCommandReason } from './guard-argv.mjs';
 import { inspectManifest } from './guard-manifest.mjs';
-import { inspectPnpmLockfile } from './guard-pnpm.mjs';
+import { findPnpmLockfile, inspectPnpmLockfile } from './guard-pnpm.mjs';
 import { compromisedListSummary, compromisedListViolation, loadCompromisedList } from './compromised.mjs';
+import { frozenLockfileInstall, stripPhantomPnpmfileChecksum, withGlobalPnpmfileDisabled } from './pnpm-checksum.mjs';
 import { PNPM_LOCK_FILE } from './lockfile.mjs';
 import { findManager } from './which.mjs';
 import { localPolicyFile, pnpmConfigFile, pnpmHookFile, policyFile } from './paths.mjs';
@@ -61,7 +62,7 @@ export async function runPnpm({ command, argv, cwd }) {
         audit({ event: 'warn', rule: 'hook-not-wired', command, cwd, reason: wiringProblem });
     }
 
-    const { isInstall } = classify(command, argv);
+    const { isInstall, command: commandWord, ownArgv } = classify(command, argv);
     const context = { command: `${command} ${argv.join(' ')}`.trim(), cwd };
 
     const unknown = unknownCommandReason(command, argv, cwd);
@@ -94,9 +95,34 @@ export async function runPnpm({ command, argv, cwd }) {
         if (summary) checked(`${subject} cleared the malicious-package list (${summary})`);
     }
 
-    audit({ event: 'run', command, argv, cwd });
+    const frozen = frozenLockfileInstall(commandWord, ownArgv);
+    audit({ event: 'run', command, argv, cwd, frozen });
+
+    // A frozen install links straight from the lockfile and never calls the
+    // resolution hook — but the wired-up global pnpmfile still makes pnpm
+    // compute a pnpmfileChecksum it then refuses to match, over a value that
+    // hashes no file. The lockfile pass above is the check that matters here, so
+    // the command is handed over with that inert hook switched off. See
+    // pnpm-checksum.mjs for why pnpm produces the mismatch at all.
+    const delivered = frozen ? withGlobalPnpmfileDisabled(argv) : argv;
+    if (frozen) {
+        info(`frozen install — the resolution hook is inert here and is left out, so pnpm's pnpmfileChecksum cannot block it`);
+    }
 
     // Passed to the hook so it reads the same policy files as the wrapper,
     // even if the repository has been moved since pnpm's config was written.
-    return delegate({ manager, argv, cwd, env: { SECURE_NPM_POLICY: policyFile } });
+    const code = await delegate({ manager, argv: delivered, cwd, env: { SECURE_NPM_POLICY: policyFile } });
+
+    // The mirror image: a resolving install does run the hook, and pnpm writes
+    // that same empty checksum into the lockfile. Committed, it breaks frozen
+    // installs for anyone without secure-npm — so strip it back out. It pins
+    // nothing, and only that exact empty-file digest is ever removed.
+    if (isInstall && !frozen && code === 0) {
+        const lockFile = findPnpmLockfile(cwd);
+        if (lockFile && stripPhantomPnpmfileChecksum(lockFile)) {
+            info(`cleared the empty pnpmfileChecksum pnpm stamped into ${PNPM_LOCK_FILE} — it pins nothing and would fail frozen installs elsewhere`);
+        }
+    }
+
+    return code;
 }
