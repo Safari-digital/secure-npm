@@ -19,6 +19,92 @@ export function isExoticSpecifier(specifier) {
     return EXOTIC_SPECIFIER.test(specifier);
 }
 
+/** Hosts whose plain https URLs npm resolves as git rather than as a tarball. */
+const HOSTED_PROVIDERS = { github: 'github.com', gitlab: 'gitlab.com', bitbucket: 'bitbucket.org' };
+const HOSTED_HOSTS = new Set(Object.values(HOSTED_PROVIDERS));
+
+function repositoryIdentity(host, pathname) {
+    if (!host || !pathname) return null;
+
+    const cleaned = pathname
+        .split(/[#?]/)[0] // the ref and the query say nothing about which repository this is
+        .replace(/\.git$/i, '')
+        .replace(/^\/+|\/+$/g, '');
+
+    // No traversal: the whitelist matches one path segment at a time, and a
+    // ".." segment is the one thing that could make two identities collide.
+    if (!cleaned || cleaned.split('/').includes('..')) return null;
+
+    return `${host.toLowerCase()}/${cleaned.toLowerCase()}`;
+}
+
+/**
+ * The repository a git specifier or a lockfile resolution points at, reduced to
+ * `host/owner/repo` — no protocol, no credentials, no `.git`, no ref. Every
+ * form npm and pnpm accept collapses onto the same string, so the whitelist is
+ * matched on the repository itself rather than on however it happened to be
+ * spelled:
+ *
+ *   github:owner/repo#semver:^1.0.0
+ *   git+ssh://git@github.com/owner/repo.git#a1b2c3d
+ *   git@github.com:owner/repo.git
+ *   https://github.com/owner/repo
+ *                                     → github.com/owner/repo
+ *
+ * Returns null for anything that is not a git source — a raw tarball URL, an
+ * unexpected host — which keeps those under `allowExoticSources` alone.
+ */
+export function gitSourceIdentity(specifier) {
+    if (typeof specifier !== 'string' || specifier === '') return null;
+
+    const shorthand = /^(github|gitlab|bitbucket):(.+)$/i.exec(specifier);
+    if (shorthand) return repositoryIdentity(HOSTED_PROVIDERS[shorthand[1].toLowerCase()], shorthand[2]);
+
+    // scp-like: git@host:owner/repo.git — a colon, not a protocol separator.
+    if (!specifier.includes('://')) {
+        const scp = /^[^@\s/]+@([^:/\s]+):(.+)$/.exec(specifier);
+        return scp ? repositoryIdentity(scp[1], scp[2]) : null;
+    }
+
+    const url = /^(git\+[a-z0-9.+-]+|git|ssh|https?):\/\/([^/]+)\/(.+)$/i.exec(specifier);
+    if (!url) return null;
+
+    const [, scheme, authority, pathname] = url;
+    const host = authority.slice(authority.lastIndexOf('@') + 1); // drop any embedded credentials
+
+    // A plain http(s) URL is a tarball unless it says otherwise, or unless the
+    // host is one npm always resolves as git.
+    const isGit =
+        /^(git|ssh)/i.test(scheme) || /\.git($|[#?])/i.test(specifier) || HOSTED_HOSTS.has(host.toLowerCase());
+    if (!isGit) return null;
+
+    return repositoryIdentity(host, pathname);
+}
+
+/**
+ * Verdict for one exotic specifier or resolution.
+ *
+ * `identity` is returned even when the answer is no, so the block message can
+ * name the exact string to whitelist instead of leaving the caller to guess it.
+ *
+ * @returns {{ allowed: boolean, identity: string | null }}
+ */
+export function exoticSourceVerdict(policy, specifier) {
+    if (policy.allowExoticSources) return { allowed: true, identity: null };
+
+    const identity = gitSourceIdentity(specifier);
+    if (identity === null) return { allowed: false, identity: null };
+
+    return { allowed: policy.allowedGitSources.some(({ pattern }) => pattern.test(identity)), identity };
+}
+
+/** Shared hint for a refused exotic source, copy-pasteable when we could name the repository. */
+export function exoticSourceHint(identity) {
+    return identity
+        ? `add "${identity}" to "allowedGitSources" in policy.json if this repository is trusted`
+        : 'install it from a registry, or add the repository to "allowedGitSources" in policy.json';
+}
+
 /**
  * `alias@npm:target@range` hides the real package name behind the key, which
  * would otherwise walk straight past a name-based block list.

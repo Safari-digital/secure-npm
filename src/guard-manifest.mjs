@@ -9,18 +9,52 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { blockedPackageReason, isExoticSpecifier, resolveName } from './rules.mjs';
+import {
+    blockedPackageReason,
+    exoticSourceHint,
+    exoticSourceVerdict,
+    gitSourceIdentity,
+    isExoticSpecifier,
+    resolveName,
+} from './rules.mjs';
 
 const FIELDS = ['dependencies', 'devDependencies', 'optionalDependencies'];
 
-export function inspectManifest(policy, cwd) {
+function readManifest(cwd) {
     const manifestFile = path.join(cwd, 'package.json');
-    if (!fs.existsSync(manifestFile)) return [];
+    if (!fs.existsSync(manifestFile)) return { manifestFile, manifest: null, error: null };
 
-    let manifest;
     try {
-        manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
+        return { manifestFile, manifest: JSON.parse(fs.readFileSync(manifestFile, 'utf8')), error: null };
     } catch (error) {
+        return { manifestFile, manifest: null, error };
+    }
+}
+
+/**
+ * Dependency keys whose specifier resolves from git.
+ *
+ * npm installs those under the key, not under the repository's own package
+ * name, and reports them that way in its dry-run output — so the key is
+ * exactly what the release-age check has to skip. See `inspectPackages`.
+ */
+export function gitSourcedManifestNames(cwd) {
+    const { manifest } = readManifest(cwd);
+    const names = new Set();
+    if (!manifest) return names;
+
+    for (const field of FIELDS) {
+        for (const [key, specifier] of Object.entries(manifest[field] ?? {})) {
+            if (gitSourceIdentity(specifier) !== null) names.add(key);
+        }
+    }
+
+    return names;
+}
+
+export function inspectManifest(policy, cwd) {
+    const { manifestFile, manifest, error } = readManifest(cwd);
+    if (error) {
         return [
             {
                 rule: 'unreadable-manifest',
@@ -29,6 +63,7 @@ export function inspectManifest(policy, cwd) {
             },
         ];
     }
+    if (!manifest) return [];
 
     const violations = [];
 
@@ -47,13 +82,16 @@ export function inspectManifest(policy, cwd) {
                 continue;
             }
 
-            if (!policy.allowExoticSources && isExoticSpecifier(specifier)) {
-                violations.push({
-                    rule: 'exotic-source',
-                    subject: `"${key}": "${specifier}" — package.json ▸ ${field}`,
-                    reason: 'git and tarball sources carry no publish date and no provenance',
-                    hint: 'install from a registry, or set "allowExoticSources" in policy.json',
-                });
+            if (isExoticSpecifier(specifier)) {
+                const { allowed, identity } = exoticSourceVerdict(policy, specifier);
+                if (!allowed) {
+                    violations.push({
+                        rule: 'exotic-source',
+                        subject: `"${key}": "${specifier}" — package.json ▸ ${field}`,
+                        reason: 'git and tarball sources carry no publish date and no provenance',
+                        hint: exoticSourceHint(identity),
+                    });
+                }
             }
         }
     }

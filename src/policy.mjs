@@ -15,12 +15,34 @@ function readJson(file) {
     }
 }
 
+/**
+ * `host/owner/repo`, where `*` stands for exactly one path segment, into an
+ * anchored pattern. Deliberately not a raw regex like `blockedPackages`: this
+ * list *grants* access, so an unanchored or dot-happy expression written by
+ * hand would widen it far past what was meant — `github.com/acme/*` must not
+ * reach `github.com.evil.net/acme/x` or `github.com/acme/x/../../y`.
+ */
+function gitSourcePattern(entry) {
+    const glob = String(entry)
+        .trim()
+        .toLowerCase()
+        .replace(/^\/+|\/+$/g, '')
+        .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+        .replaceAll('\\*', '[^/]+');
+
+    return new RegExp(`^${glob}$`);
+}
+
 function compile(raw) {
     const blockedPackages = (raw.blockedPackages ?? []).map(({ pattern, reason }) => ({
         pattern: new RegExp(pattern),
         source: pattern,
         reason,
     }));
+
+    const allowedGitSources = (raw.allowedGitSources ?? [])
+        .filter(entry => typeof entry === 'string' && entry.trim() !== '')
+        .map(entry => ({ pattern: gitSourcePattern(entry), source: entry }));
 
     const blockedManagers = new Map(
         (raw.blockedManagers ?? []).map(({ command, reason }) => [command.toLowerCase(), reason])
@@ -30,6 +52,7 @@ function compile(raw) {
         minimumReleaseAgeMinutes: raw.minimumReleaseAgeMinutes ?? 0,
         minimumReleaseAgeExclude: new Set(raw.minimumReleaseAgeExclude ?? []),
         allowExoticSources: raw.allowExoticSources === true,
+        allowedGitSources,
         forceIgnoreScripts: raw.forceIgnoreScripts !== false,
         trustPolicy: raw.trustPolicy ?? 'no-downgrade',
         trustPolicyIgnoreAfterMinutes: raw.trustPolicyIgnoreAfterMinutes ?? 129600,

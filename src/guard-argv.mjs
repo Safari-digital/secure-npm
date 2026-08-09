@@ -9,7 +9,13 @@
  * not enforcement.
  */
 
-import { blockedPackageReason, isExoticSpecifier } from './rules.mjs';
+import {
+    blockedPackageReason,
+    exoticSourceHint,
+    exoticSourceVerdict,
+    gitSourceIdentity,
+    isExoticSpecifier,
+} from './rules.mjs';
 
 // Aliases included: npm accepts a generous set of them, and a command word we
 // fail to recognise is a command that skips the checks.
@@ -91,7 +97,16 @@ function registryOverride(argv) {
 }
 
 function splitTarget(raw) {
-    if (isExoticSpecifier(raw)) return { raw, name: null, version: null, exotic: true };
+    if (isExoticSpecifier(raw)) {
+        const identity = gitSourceIdentity(raw);
+
+        // npm installs a bare git target under the repository's own package
+        // name, which is the last path segment in every ordinary case. Only
+        // used to exempt it from the release-age check, never to grant access.
+        const gitName = identity ? identity.slice(identity.lastIndexOf('/') + 1) : null;
+
+        return { raw, name: null, version: null, exotic: true, gitIdentity: identity, gitName };
+    }
 
     const separator = raw.lastIndexOf('@');
     if (separator <= 0) return { raw, name: raw, version: null, exotic: false };
@@ -157,13 +172,16 @@ export function inspectArgv(policy, manager, argv) {
     }
 
     for (const target of targets) {
-        if (target.exotic && !policy.allowExoticSources) {
-            violations.push({
-                rule: 'exotic-source',
-                subject: target.raw,
-                reason: 'git and tarball sources carry no publish date and no provenance',
-                hint: 'install from a registry, or set "allowExoticSources" in policy.json',
-            });
+        if (target.exotic) {
+            const { allowed, identity } = exoticSourceVerdict(policy, target.raw);
+            if (!allowed) {
+                violations.push({
+                    rule: 'exotic-source',
+                    subject: identity ? `${target.raw} — ${identity}` : target.raw,
+                    reason: 'git and tarball sources carry no publish date and no provenance',
+                    hint: exoticSourceHint(identity),
+                });
+            }
             continue;
         }
 

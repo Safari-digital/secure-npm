@@ -17,7 +17,15 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { blockedPackageReason, isAgeExempt, isExoticResolution, registryFor } from './rules.mjs';
+import {
+    blockedPackageReason,
+    exoticSourceHint,
+    exoticSourceVerdict,
+    gitSourceIdentity,
+    isAgeExempt,
+    isExoticResolution,
+    registryFor,
+} from './rules.mjs';
 import { mapWithConcurrency, resolvePublishDate } from './registry.mjs';
 
 const PREVIEW_TIMEOUT_MS = 180_000;
@@ -76,8 +84,18 @@ export function previewResolution({ manager, argv, cwd }) {
     });
 }
 
-/** Blocked names and immature releases across a resolved package set. */
-export async function inspectPackages(policy, packages) {
+/**
+ * Blocked names and immature releases across a resolved package set.
+ *
+ * `gitSourced` names are exempt from the age check and from it alone. A package
+ * taken from a whitelisted repository has no registry publish date, and the
+ * version it reports belongs to a commit — looking it up would read the date of
+ * whatever unrelated package happens to sit under that name on the registry,
+ * which is worse than not checking. The name is the unit here rather than
+ * name@version, because npm's dry-run report is all the wrapper has to go on
+ * before anything is written.
+ */
+export async function inspectPackages(policy, packages, gitSourced = new Set()) {
     const violations = [];
     const cutoffMs = Date.now() - policy.minimumReleaseAgeMinutes * 60 * 1000;
 
@@ -91,6 +109,7 @@ export async function inspectPackages(policy, packages) {
         }
 
         if (policy.minimumReleaseAgeMinutes <= 0 || isAgeExempt(policy, name, version)) continue;
+        if (gitSourced.has(name)) continue;
 
         const registry = registryFor(policy, name);
         if (registry === null) {
@@ -158,33 +177,43 @@ function readLockfile(cwd) {
 }
 
 /**
- * Every package a lockfile pins.
+ * Every package a lockfile pins, and which of them came from git.
  *
  * `npm ci` deletes node_modules and reinstalls the whole lockfile, but its
  * `--dry-run` report only lists what is missing from the *current* tree — with
  * node_modules in place it reports nothing at all. The lockfile is therefore
- * the only honest answer to "what is about to be fetched".
+ * the only honest answer to "what is about to be fetched", and the one place
+ * where each entry says where it resolved from.
+ *
+ * @returns {{ packages: {name: string, version: string}[], gitSourced: Set<string> }}
  */
 export function lockfilePackages(cwd) {
     const { lock } = readLockfile(cwd);
-    if (!lock) return [];
+    if (!lock) return { packages: [], gitSourced: new Set() };
 
     const packages = [];
+    const gitSourced = new Set();
+
     for (const [key, entry] of Object.entries(lock.packages ?? {})) {
         if (key === '' || entry?.link === true || !entry?.version) continue;
 
         const name = nameFromLockKey(key, entry);
-        if (name) packages.push({ name, version: entry.version });
+        if (!name) continue;
+
+        packages.push({ name, version: entry.version });
+        if (gitSourceIdentity(entry?.resolved) !== null) gitSourced.add(name);
     }
 
     // The same package can be pinned at several depths.
     const seen = new Set();
-    return packages.filter(({ name, version }) => {
+    const deduped = packages.filter(({ name, version }) => {
         const id = `${name}@${version}`;
         if (seen.has(id)) return false;
         seen.add(id);
         return true;
     });
+
+    return { packages: deduped, gitSourced };
 }
 
 /**
@@ -211,13 +240,18 @@ export function inspectLockfile(policy, cwd) {
             continue;
         }
 
-        if (!policy.allowExoticSources && isExoticResolution(policy, entry?.resolved)) {
-            violations.push({
-                rule: 'exotic-source',
-                subject: `${name} — ${entry.resolved}`,
-                reason: 'resolved outside every registry listed in the policy',
-                hint: 'add the registry to policy.json, or replace the dependency',
-            });
+        if (isExoticResolution(policy, entry?.resolved)) {
+            const { allowed, identity } = exoticSourceVerdict(policy, entry.resolved);
+            if (!allowed) {
+                violations.push({
+                    rule: 'exotic-source',
+                    subject: `${name} — ${entry.resolved}`,
+                    reason: 'resolved outside every registry listed in the policy',
+                    hint: identity
+                        ? exoticSourceHint(identity)
+                        : 'add the registry to policy.json, or replace the dependency',
+                });
+            }
         }
     }
 

@@ -131,9 +131,14 @@ ignoreScripts: ${policy.forceIgnoreScripts}
 
 # git and tarball sub-dependencies carry no publish date and no provenance,
 # which is exactly how the checks above get bypassed.
-blockExoticSubdeps: ${!policy.allowExoticSources}
+#
+# This setting is a boolean, so it cannot express "these repositories and no
+# others". With allowedGitSources in use it is therefore handed to the hook
+# below, which enforces the same rule per repository, at every depth.
+blockExoticSubdeps: ${!policy.allowExoticSources && policy.allowedGitSources.length === 0}
 
-# Name-based blocking, which pnpm has no setting for.
+# Name-based blocking and the git whitelist, neither of which pnpm has a
+# setting for.
 globalPnpmfile: '${pnpmHookFile}'
 `;
 }

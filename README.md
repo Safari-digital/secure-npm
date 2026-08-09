@@ -16,8 +16,8 @@ malicious version reaches your machine before anyone has noticed.
 
 This repository closes that gap and applies the same rules to both: a version must have existed for three days before it can be installed, a
 version published with weaker guarantees than an earlier one is refused, lifecycle scripts never run, `git:`
-and tarball dependencies are rejected, blocked names are refused at any depth, and `bun`, `yarn` and `deno`
-are refused outright.
+and tarball dependencies are rejected unless the repository is whitelisted, blocked names are refused at any
+depth, and `bun`, `yarn` and `deno` are refused outright.
 
 ## Install
 
@@ -87,6 +87,7 @@ shallow-merged on top. After editing, re-run `node install.mjs` so pnpm's config
 | `trustPolicy`                   | pnpm only, `no-downgrade` or `off`                            |
 | `trustPolicyIgnoreAfterMinutes` | only check versions younger than this (default 90 days)       |
 | `allowExoticSources`            | permit `git:` / tarball dependencies                          |
+| `allowedGitSources`             | git repositories exempt from that, as `host/owner/repo`, `*` matching one path segment. Also exempt from the release-age check, which a commit has no answer for |
 | `forceIgnoreScripts`            | disable lifecycle scripts at install time                     |
 | `blockedManagers`               | commands the shims refuse outright                            |
 | `blockedPackages`               | name patterns refused at any depth, on both managers          |

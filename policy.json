@@ -11,6 +11,19 @@
 
     "allowExoticSources": false,
 
+    "$allowedGitSourcesComment": [
+        "Exception list for git dependencies, consulted whenever allowExoticSources",
+        "is false. Entries are repositories written as host/owner/repo, matched at any",
+        "depth against the normalised form of every git specifier and every lockfile",
+        "resolution — github:owner/repo, git+ssh://git@github.com/owner/repo.git#sha and",
+        "https://github.com/owner/repo all reduce to github.com/owner/repo. A '*' stands",
+        "for exactly one path segment, so host/owner/* covers a whole organisation and",
+        "nothing beyond it. Refused sources print the exact string to add here.",
+        "Whitelisting a repository also exempts it from the release-age check: a commit",
+        "has no registry publish date, and the version it declares is not the registry's."
+    ],
+    "allowedGitSources": ["github.com/safari-digital/*"],
+
     "forceIgnoreScripts": true,
 
     "$trustPolicyComment": [

@@ -62,6 +62,16 @@ function doctor() {
     line(OK, 'blocked managers', [...policy.blockedManagers.keys()].join(', ') || 'none');
     line(OK, 'blocked packages', `${policy.blockedPackages.length} pattern(s)`);
 
+    // Worth naming rather than counting: these are the only sources allowed in
+    // without a publish date behind them.
+    line(
+        policy.allowExoticSources ? MEH : OK,
+        'git sources allowed',
+        policy.allowExoticSources
+            ? 'every git and tarball source (allowExoticSources is on)'
+            : policy.allowedGitSources.map(({ source }) => source).join(', ') || 'none'
+    );
+
     fs.existsSync(shimMarkerFile)
         ? line(OK, 'shim directory', binDir)
         : fail('shim directory', `not installed: ${binDir} — run "node install.mjs"`);
@@ -89,6 +99,15 @@ function doctor() {
         /^\s*trustPolicy\s*:\s*no-downgrade/m.test(contents)
             ? line(OK, 'pnpm trust policy', 'no-downgrade')
             : line(MEH, 'pnpm trust policy', 'not set to no-downgrade');
+
+        // Editing allowedGitSources without re-running the installer leaves
+        // pnpm blocking natively what the policy now allows — and the error
+        // comes from pnpm, which knows nothing about the whitelist.
+        const blocksNatively = /^\s*blockExoticSubdeps\s*:\s*true/m.test(contents);
+        const shouldBlockNatively = !policy.allowExoticSources && policy.allowedGitSources.length === 0;
+        blocksNatively === shouldBlockNatively
+            ? line(OK, 'pnpm exotic sub-dependencies', blocksNatively ? 'blocked natively' : 'delegated to the hook')
+            : fail('pnpm exotic sub-dependencies', 'no longer matches the policy — run "node install.mjs"');
     }
 
     const npmrc = npmUserConfigFile();
@@ -151,6 +170,7 @@ function showPolicy() {
                 minimumReleaseAgeMinutes: policy.minimumReleaseAgeMinutes,
                 minimumReleaseAgeExclude: [...policy.minimumReleaseAgeExclude],
                 allowExoticSources: policy.allowExoticSources,
+                allowedGitSources: policy.allowedGitSources.map(({ source }) => source),
                 forceIgnoreScripts: policy.forceIgnoreScripts,
                 blockedManagers: Object.fromEntries(policy.blockedManagers),
                 blockedPackages: policy.blockedPackages.map(({ source, reason }) => ({ pattern: source, reason })),

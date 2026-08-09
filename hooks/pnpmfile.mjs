@@ -12,7 +12,14 @@
 import { audit, banner, reportBlock } from '../src/logger.mjs';
 import { loadPolicy } from '../src/policy.mjs';
 import { localPolicyFile, policyFile } from '../src/paths.mjs';
-import { INSTALLED_FIELDS, blockedPackageReason, isExoticSpecifier, resolveName } from '../src/rules.mjs';
+import {
+    INSTALLED_FIELDS,
+    blockedPackageReason,
+    exoticSourceHint,
+    exoticSourceVerdict,
+    isExoticSpecifier,
+    resolveName,
+} from '../src/rules.mjs';
 import fs from 'node:fs';
 
 const policy = loadPolicy();
@@ -73,14 +80,21 @@ function readPackage(pkg) {
                 });
             }
 
-            if (!policy.allowExoticSources && isExoticSpecifier(specifier)) {
-                refuse({
-                    rule: 'exotic-source',
-                    subject: `"${key}": "${specifier}", required by ${origin} ▸ ${field}`,
-                    reason: 'git and tarball sources carry no publish date and no provenance attestation',
-                    hint: 'install from a registry, or set "allowExoticSources" in policy.json',
-                    origin,
-                });
+            // When the whitelist is in use this is the only enforcement point
+            // left for sub-dependencies: pnpm's own blockExoticSubdeps is a
+            // boolean and cannot tell an allowed repository from the rest, so
+            // the installer hands the decision here.
+            if (isExoticSpecifier(specifier)) {
+                const { allowed, identity } = exoticSourceVerdict(policy, specifier);
+                if (!allowed) {
+                    refuse({
+                        rule: 'exotic-source',
+                        subject: `"${key}": "${specifier}", required by ${origin} ▸ ${field}`,
+                        reason: 'git and tarball sources carry no publish date and no provenance attestation',
+                        hint: exoticSourceHint(identity),
+                        origin,
+                    });
+                }
             }
         }
     }

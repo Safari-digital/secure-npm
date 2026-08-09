@@ -9,7 +9,7 @@ import { audit, banner, checked, info, warn } from './logger.mjs';
 import { loadPolicy } from './policy.mjs';
 import { abort, delegate } from './execute.mjs';
 import { classify, inspectArgv } from './guard-argv.mjs';
-import { inspectManifest } from './guard-manifest.mjs';
+import { gitSourcedManifestNames, inspectManifest } from './guard-manifest.mjs';
 import { inspectLockfile, inspectPackages, lockfilePackages, previewResolution } from './guard-npm.mjs';
 import { resolveDistTag } from './registry.mjs';
 import { registryFor } from './rules.mjs';
@@ -82,10 +82,13 @@ export async function runNpm({ command, argv, cwd }) {
     // nothing when node_modules is already populated. The lockfile is the
     // package set, so it is checked directly and the preview is skipped.
     if (subCommand === 'ci' || subCommand === 'clean-install') {
-        const pinned = lockfilePackages(cwd);
+        const { packages: pinned, gitSourced } = lockfilePackages(cwd);
         info(`checking the ${pinned.length} package(s) pinned in package-lock.json…`);
 
-        const violations = [...inspectLockfile(policy, cwd), ...(await inspectPackages(policy, pinned))];
+        const violations = [
+            ...inspectLockfile(policy, cwd),
+            ...(await inspectPackages(policy, pinned, gitSourced)),
+        ];
         if (violations.length) return abort({ ...context, phase: 'lockfile', violations });
 
         checked(`${pinned.length} pinned package(s) cleared the policy`);
@@ -111,7 +114,14 @@ export async function runNpm({ command, argv, cwd }) {
         if (preview.packages.length === 0) {
             info('nothing new to resolve');
         } else {
-            const packageViolations = await inspectPackages(policy, preview.packages);
+            // Whitelisted git sources cleared the argv and manifest guards
+            // above; the age check must not then judge them by the registry.
+            const gitSourced = new Set([
+                ...gitSourcedManifestNames(cwd),
+                ...targets.map(target => target.gitName).filter(Boolean),
+            ]);
+
+            const packageViolations = await inspectPackages(policy, preview.packages, gitSourced);
             if (packageViolations.length) {
                 return abort({ ...context, phase: 'resolution', violations: packageViolations });
             }
