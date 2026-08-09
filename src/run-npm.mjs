@@ -8,7 +8,7 @@
 import { audit, banner, checked, info, warn } from './logger.mjs';
 import { loadPolicy } from './policy.mjs';
 import { abort, delegate } from './execute.mjs';
-import { classify, inspectArgv } from './guard-argv.mjs';
+import { classify, inspectArgv, unknownCommandReason } from './guard-argv.mjs';
 import { gitSourcedManifestNames, inspectManifest } from './guard-manifest.mjs';
 import { inspectLockfile, inspectPackages, lockfilePackages, previewResolution } from './guard-npm.mjs';
 import {
@@ -68,6 +68,13 @@ export async function runNpm({ command, argv, cwd }) {
 
     const { command: subCommand, isInstall, isExec, targets } = classify(command, argv);
     const context = { command: `${command} ${argv.join(' ')}`.trim(), cwd };
+
+    const unknown = unknownCommandReason(command, argv, cwd);
+    if (unknown) {
+        warn(unknown.reason);
+        info(unknown.hint);
+        audit({ event: 'warn', rule: 'unknown-command', command, argv, cwd, reason: unknown.reason });
+    }
 
     const argvViolations = inspectArgv(policy, command, argv);
     if (argvViolations.length) return abort({ ...context, phase: 'argv', violations: argvViolations });

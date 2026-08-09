@@ -16,10 +16,10 @@
  */
 
 import fs from 'node:fs';
-import { audit, banner, checked, warn } from './logger.mjs';
+import { audit, banner, checked, info, warn } from './logger.mjs';
 import { loadPolicy } from './policy.mjs';
 import { abort, delegate } from './execute.mjs';
-import { classify, inspectArgv } from './guard-argv.mjs';
+import { classify, inspectArgv, unknownCommandReason } from './guard-argv.mjs';
 import { inspectManifest } from './guard-manifest.mjs';
 import { inspectPnpmLockfile } from './guard-pnpm.mjs';
 import { compromisedListSummary, compromisedListViolation, loadCompromisedList } from './compromised.mjs';
@@ -63,6 +63,13 @@ export async function runPnpm({ command, argv, cwd }) {
 
     const { isInstall } = classify(command, argv);
     const context = { command: `${command} ${argv.join(' ')}`.trim(), cwd };
+
+    const unknown = unknownCommandReason(command, argv, cwd);
+    if (unknown) {
+        warn(unknown.reason);
+        info(unknown.hint);
+        audit({ event: 'warn', rule: 'unknown-command', command, argv, cwd, reason: unknown.reason });
+    }
 
     const argvViolations = inspectArgv(policy, command, argv);
     if (argvViolations.length) return abort({ ...context, phase: 'argv', violations: argvViolations });

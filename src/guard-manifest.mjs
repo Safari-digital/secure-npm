@@ -18,6 +18,7 @@ import {
     resolveName,
 } from './rules.mjs';
 import { compromisedReason } from './compromised.mjs';
+import { MANIFEST_FILE, findIndexableFiles, findRepositoryRoot } from './lockfile.mjs';
 
 const FIELDS = ['dependencies', 'devDependencies', 'optionalDependencies'];
 
@@ -39,6 +40,40 @@ function readManifest(cwd) {
  * name, and reports them that way in its dry-run output — so the key is
  * exactly what the release-age check has to skip. See `inspectPackages`.
  */
+function scriptNamesIn(file, names) {
+    try {
+        const { scripts } = JSON.parse(fs.readFileSync(file, 'utf8'));
+        for (const name of Object.keys(scripts ?? {})) names.add(name);
+    } catch {
+        // A manifest that cannot be read declares nothing, which is the safe answer:
+        // the caller only uses this to stay quiet, never to let something through.
+    }
+    return names;
+}
+
+/** Script names declared by the manifest in this directory. */
+export function manifestScriptNames(cwd) {
+    return scriptNamesIn(path.join(cwd, 'package.json'), new Set());
+}
+
+/**
+ * Script names declared anywhere in the repository.
+ *
+ * The fallback behind `manifestScriptNames`, for `pnpm --filter web build`,
+ * where the script belongs to another package entirely. Walking the tree is not
+ * free, so it is only ever reached once the local manifest has come up empty on
+ * a word we already failed to recognise as a command.
+ */
+export function workspaceScriptNames(cwd) {
+    const names = new Set();
+
+    for (const file of findIndexableFiles(findRepositoryRoot(cwd))) {
+        if (path.basename(file) === MANIFEST_FILE) scriptNamesIn(file, names);
+    }
+
+    return names;
+}
+
 export function gitSourcedManifestNames(cwd) {
     const { manifest } = readManifest(cwd);
     const names = new Set();

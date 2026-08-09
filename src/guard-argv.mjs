@@ -16,6 +16,7 @@ import {
     gitSourceIdentity,
     isExoticSpecifier,
 } from './rules.mjs';
+import { manifestScriptNames, workspaceScriptNames } from './guard-manifest.mjs';
 
 // Aliases included: npm accepts a generous set of them, and a command word we
 // fail to recognise is a command that skips the checks.
@@ -137,7 +138,39 @@ export function classify(manager, argv) {
     // `npx pkg` takes its target first; `npm install pkg` takes it after the command.
     const targets = (isNpx ? positionals.slice(0, 1) : positionals.slice(found.index + 1)).map(splitTarget);
 
-    return { family, command, isInstall, isExec, targets, ownArgv };
+    return { family, command, isInstall, isExec, targets, ownArgv, positionals };
+}
+
+/**
+ * A command word this wrapper does not know about.
+ *
+ * Everything here keys off recognising the command, so a word that falls
+ * through classifies as inert and skips every check in silence. That is not
+ * theoretical: pnpm grew `ci` — which wipes node_modules and reinstalls the
+ * whole lockfile — while this file did not, and nothing said a thing.
+ *
+ * It cannot be an error, because the managers keep adding harmless commands
+ * too, and refusing those would make the wrapper the problem. But it cannot
+ * stay quiet either. The one thing standing between "unknown command" and a
+ * warning on every `pnpm dev` is that a script is not a command, so the
+ * project's own scripts are what the word is checked against first.
+ *
+ * @returns {{ reason: string, hint: string } | null} null when there is nothing to say.
+ */
+export function unknownCommandReason(manager, argv, cwd) {
+    const { command, positionals } = classify(manager, argv);
+    if (command !== '' || positionals.length === 0) return null;
+
+    const local = manifestScriptNames(cwd);
+    if (positionals.some(word => local.has(word))) return null;
+
+    const workspace = workspaceScriptNames(cwd);
+    if (positionals.some(word => workspace.has(word))) return null;
+
+    return {
+        reason: `"${positionals.join(' ')}" is neither a command this wrapper knows nor a script in this project`,
+        hint: 'no install checks ran — if that command installs anything, this tool is blind to it',
+    };
 }
 
 /**
