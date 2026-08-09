@@ -1,17 +1,20 @@
 #!/usr/bin/env node
 /**
- * Installer. Wires four things together and then gets out of the way:
+ * Installer. Wires five things together and then gets out of the way:
  *
- *   1. shims in a directory that goes first on PATH, so `npm` and `pnpm` route
+ *   1. a copy of the runtime under %LOCALAPPDATA%, which is what every shim and
+ *      every pnpm process then loads,
+ *   2. shims in a directory that goes first on PATH, so `npm` and `pnpm` route
  *      through the guard rails and `bun`/`yarn`/`deno` route to a refusal,
- *   2. pnpm's global config, which is where pnpm's own supply-chain settings
+ *   3. pnpm's global config, which is where pnpm's own supply-chain settings
  *      live and where the resolution hook is registered,
- *   3. the user's .npmrc, so npm refuses lifecycle scripts even when it is
+ *   4. the user's .npmrc, so npm refuses lifecycle scripts even when it is
  *      invoked by something that bypassed the shim,
- *   4. optionally PATH itself, behind --set-path.
+ *   5. optionally PATH itself, behind --set-path.
  *
- * Nothing is copied out of the repository: every generated file points back
- * here, so `git pull` is the entire update procedure.
+ * Nothing generated points back at this repository, which is why running the
+ * installer is now part of the update procedure: `git pull` alone changes the
+ * source and leaves the deployed copy where it was. `doctor` compares the two.
  *
  * Usage: node install.mjs [--set-path] [--force]
  */
@@ -21,17 +24,22 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { loadPolicy } from './src/policy.mjs';
+import { deployRuntime } from './src/runtime.mjs';
 import { columns, styleFor } from './src/style.mjs';
 import {
     IS_WINDOWS,
     binDir,
+    configDir,
     entryPoint,
-    installRoot,
+    legacyLocalPolicyFile,
+    localPolicyFile,
+    moduleRoot,
     npmUserConfigFile,
     pnpmConfigDir,
     pnpmConfigFile,
     pnpmHookFile,
-    policyFile,
+    runtimePolicyFile,
+    runtimeRoot,
     shimMarkerFile,
 } from './src/paths.mjs';
 
@@ -51,6 +59,35 @@ const notes = [];
 /** One row of the final report. `depth` indents the label, never the value. */
 function report(label, value, depth = 0) {
     done.push({ label, value, depth });
+}
+
+/* ---------------------------------------------------------------- runtime */
+
+function installRuntime() {
+    const stamp = deployRuntime(moduleRoot);
+
+    report('runtime', runtimeRoot);
+    report('from', `${moduleRoot} ${dim(`(v${stamp.version})`)}`, 1);
+}
+
+/**
+ * The overlay used to sit in the repository, git-ignored. It is moved rather
+ * than copied: two files, one of them silently no longer read, is the worst of
+ * the available outcomes.
+ */
+function migrateLocalPolicy() {
+    if (!fs.existsSync(legacyLocalPolicyFile)) return;
+
+    if (fs.existsSync(localPolicyFile)) {
+        notes.push(`${legacyLocalPolicyFile} is no longer read — the overlay in use is ${localPolicyFile}`);
+        return;
+    }
+
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.copyFileSync(legacyLocalPolicyFile, localPolicyFile);
+    fs.rmSync(legacyLocalPolicyFile);
+
+    report('local policy', `${localPolicyFile} ${dim('(moved out of the repository)')}`);
 }
 
 /* ------------------------------------------------------------------ shims */
@@ -100,7 +137,7 @@ function installShims(policy) {
     fs.mkdirSync(binDir, { recursive: true });
     fs.writeFileSync(
         shimMarkerFile,
-        `${MANAGED_MARKER}\ninstallRoot=${installRoot}\n\nThis marker tells the wrapper to skip this directory when it looks for the\nreal package managers on PATH. Removing it causes infinite recursion.\n`
+        `${MANAGED_MARKER}\nruntime=${runtimeRoot}\n\nThis marker tells the wrapper to skip this directory when it looks for the\nreal package managers on PATH. Removing it causes infinite recursion.\n`
     );
 
     const wrapped = ['npm', 'npx', 'pnpm', 'pnpx'];
@@ -121,7 +158,7 @@ function pnpmConfigContents(policy) {
     const exclude = [...policy.minimumReleaseAgeExclude];
 
     return `# ${MANAGED_MARKER} — regenerate with "node install.mjs"
-# Source of truth: ${policyFile}
+# Source of truth: ${runtimePolicyFile}, overlaid with ${localPolicyFile}
 #
 # Applies to every pnpm project on this machine, including projects with no
 # pnpm-workspace.yaml and including "pnpm dlx". A project may tighten these in
@@ -274,8 +311,16 @@ ${BLOCK_END}`;
 /* -------------------------------------------------------------------- main */
 
 function main() {
+    // Before the policy is read, not after: on the run that migrates it, the
+    // overlay is still in the repository and would otherwise be missed exactly
+    // once — on the run that generates pnpm's config from it.
+    migrateLocalPolicy();
+
+    // Read from the repository, which is the source of truth at install time;
+    // the deployed copy is what every later command reads.
     const policy = loadPolicy();
 
+    installRuntime();
     installShims(policy);
     installPnpmConfig(policy);
     installNpmrc();
@@ -286,17 +331,18 @@ function main() {
         notes.push(`PATH was left alone — re-run with --set-path, or put ${binDir} first on PATH yourself`);
     }
 
+    notes.push('re-run this installer after every "git pull" — doctor reports a runtime that has fallen behind');
+
     // Notes and the closing line share the grid rather than sitting outside it,
     // so the whole report has one label column and one value column.
     const rows = [
-        { label: 'source', value: installRoot },
         ...done,
         ...notes.map(note => ({ label: 'note', value: note })),
         { label: 'next', value: bold('secure-npm doctor') },
     ];
 
     const lines = columns(rows, label => (label.trimEnd() === 'note' ? yellow(label) : dim(label)));
-    const sections = [lines.slice(0, 1), lines.slice(1, 1 + done.length), lines.slice(1 + done.length)];
+    const sections = [lines.slice(0, done.length), lines.slice(done.length)];
 
     process.stdout.write(`\n${bold('secure-npm installer')}\n\n`);
     process.stdout.write(`${sections.map(section => section.join('\n')).join('\n\n')}\n\n`);

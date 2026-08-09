@@ -28,15 +28,22 @@ git clone git@github.com:Safari-digital/secure-npm.git && cd secure-npm && node 
 ```
 
 `--set-path` prepends the shim directory to your user PATH *(the previous value is backed up next to the
-shims)*. Drop it to have the installer print the directory and leave PATH alone. Nothing is copied out of the
-repository, every generated file points back here, so `git pull` is the whole update procedure.
+shims)*. Drop it to have the installer print the directory and leave PATH alone.
 
-| What                      | Where                                                                   |
-|---------------------------|-------------------------------------------------------------------------|
-| Shims                     | `%LOCALAPPDATA%\secure-npm\bin` · `~/.local/share/secure-npm/bin`       |
-| pnpm global config + hook | `%LOCALAPPDATA%\pnpm\config\config.yaml` · `~/.config/pnpm/config.yaml` |
-| npm config                | `~/.npmrc` (managed block only, auth tokens are never touched)          |
-| Audit log                 | `%LOCALAPPDATA%\secure-npm\logs` · `~/.local/state/secure-npm/logs`     |
+| What                | Where                                                                                    |
+|---------------------|------------------------------------------------------------------------------------------|
+| Runtime             | `%LOCALAPPDATA%\secure-npm\runtime` · `~/.local/share/secure-npm/runtime`                |
+| Shims               | `%LOCALAPPDATA%\secure-npm\bin` · `~/.local/share/secure-npm/bin`                        |
+| Policy overlay      | `%LOCALAPPDATA%\secure-npm\policy.local.json` · `~/.config/secure-npm/policy.local.json` |
+| pnpm config  + hook | `%LOCALAPPDATA%\pnpm\config\config.yaml` · `~/.config/pnpm/config.yaml`                  |
+| npm config          | `~/.npmrc` (managed block only, auth tokens are never touched)                           |
+| Audit log           | `%LOCALAPPDATA%\secure-npm\logs` · `~/.local/state/secure-npm/logs`                      |
+
+### Update
+
+```bash
+git pull && node install.mjs
+```
 
 ## Usage
 
@@ -48,8 +55,8 @@ after installing, then every wrapped command announces the policy it is running 
 
 ```
 ▸ secure-npm  Securely running pnpm add vite
-              policy   ~/.sources/safari-digital/secure-npm/policy.json
-              hook     ~/.sources/safari-digital/secure-npm/hooks/pnpmfile.mjs
+              policy   ~/.local/share/secure-npm/runtime/policy.json + ~/.config/secure-npm/policy.local.json
+              hook     ~/.local/share/secure-npm/runtime/hooks/pnpmfile.mjs
               binary   ~/.local/share/nvs/default/node_modules/pnpm/bin/pnpm.cjs
               audit    ~/.local/state/secure-npm/logs/audit.log
 ```
@@ -66,32 +73,28 @@ And when a rule fires, it says which one, on what, and why and then records it:
 `bun`, `yarn` and `deno` are shimmed too, and refuse to run at all.
 
 ### Additional commands
-> The tool ships its own shim, so these work from anywhere:
 
 ```bash
-secure-npm doctor      # check that the guard rails are actually wired up
-secure-npm log 20      # recent audit entries
-secure-npm policy      # the effective policy, after the local overlay
+secure-npm doctor        # check that the guard rails are actually wired up
+secure-npm edit-policy   # open this machine's overrides, creating them if needed
+secure-npm log 20        # recent audit entries
+secure-npm policy        # the effective policy, after the local overlay
 ```
 
 ## Configuration
 
-`policy.json` is the shared ruleset. Machine-specific overrides go in `policy.local.json` (git-ignored),
-shallow-merged on top. After editing, re-run `node install.mjs` so pnpm's config picks up the change, then
-`doctor`.
-
-| Key                             | Meaning                                                       |
-|---------------------------------|---------------------------------------------------------------|
-| `minimumReleaseAgeMinutes`      | how long a version must have existed (default 4320 = 3 days)  |
-| `minimumReleaseAgeExclude`      | `name` or `name@version` entries exempt from the age check    |
-| `trustPolicy`                   | pnpm only, `no-downgrade` or `off`                            |
-| `trustPolicyIgnoreAfterMinutes` | only check versions younger than this (default 90 days)       |
-| `allowExoticSources`            | permit `git:` / tarball dependencies                          |
+| Key                             | Meaning                                                                                                                                                          |
+|---------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `minimumReleaseAgeMinutes`      | how long a version must have existed (default 4320 = 3 days)                                                                                                     |
+| `minimumReleaseAgeExclude`      | `name` or `name@version` entries exempt from the age check                                                                                                       |
+| `trustPolicy`                   | pnpm only, `no-downgrade` or `off`                                                                                                                               |
+| `trustPolicyIgnoreAfterMinutes` | only check versions younger than this (default 90 days)                                                                                                          |
+| `allowExoticSources`            | permit `git:` / tarball dependencies                                                                                                                             |
 | `allowedGitSources`             | git repositories exempt from that, as `host/owner/repo`, `*` matching one path segment. Also exempt from the release-age check, which a commit has no answer for |
-| `forceIgnoreScripts`            | disable lifecycle scripts at install time                     |
-| `blockedManagers`               | commands the shims refuse outright                            |
-| `blockedPackages`               | name patterns refused at any depth, on both managers          |
-| `registries`                    | approved registries per scope, an unlisted scope fails closed |
+| `forceIgnoreScripts`            | disable lifecycle scripts at install time                                                                                                                        |
+| `blockedManagers`               | commands the shims refuse outright                                                                                                                               |
+| `blockedPackages`               | name patterns refused at any depth, on both managers                                                                                                             |
+| `registries`                    | approved registries per scope, an unlisted scope fails closed                                                                                                    |
 
 ## Uninstall
 
@@ -99,5 +102,5 @@ shallow-merged on top. After editing, re-run `node install.mjs` so pnpm's config
 node uninstall.mjs --set-path
 ```
 
-Only files carrying the `managed by secure-npm` marker are touched, so a hand-edited pnpm config or an
-`.npmrc` with credentials survives.
+Removes the deployed runtime and the shims. Beyond those, only files carrying the `managed by secure-npm`
+marker are touched, so a hand-edited pnpm config or an `.npmrc` with credentials survives.

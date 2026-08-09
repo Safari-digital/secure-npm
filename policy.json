@@ -1,8 +1,9 @@
 {
     "$comment": [
         "Shared policy, versioned so every machine enforces the same rules.",
-        "Machine-specific overrides go in policy.local.json (git-ignored), which is",
-        "shallow-merged on top of this file. Run `secure-npm --self doctor` after editing."
+        "Machine-specific overrides live outside this repository, in the overlay that",
+        "`secure-npm edit-policy` opens; it is shallow-merged on top of this file.",
+        "Editing this file changes nothing until `node install.mjs` redeploys it."
     ],
 
     "minimumReleaseAgeMinutes": 4320,

@@ -1,6 +1,7 @@
 /**
- * Policy loading. `policy.json` is the shared, versioned ruleset;
- * `policy.local.json` is a git-ignored per-machine overlay merged on top.
+ * Policy loading. `policy.json` is the shared, versioned ruleset, read from the
+ * deployed runtime; `policy.local.json` is a per-machine overlay merged on top,
+ * kept outside the repository entirely and written by `secure-npm edit-policy`.
  */
 
 import fs from 'node:fs';

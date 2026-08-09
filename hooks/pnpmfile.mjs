@@ -21,6 +21,7 @@ import {
     resolveName,
 } from '../src/rules.mjs';
 import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 const policy = loadPolicy();
 
@@ -30,7 +31,7 @@ if (!process.env.SECURE_NPM_POLICY) {
     banner({
         command: 'pnpm (called directly)',
         policyFiles: fs.existsSync(localPolicyFile) ? [policyFile, localPolicyFile] : [policyFile],
-        hookFile: new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'),
+        hookFile: fileURLToPath(import.meta.url),
     });
 }
 

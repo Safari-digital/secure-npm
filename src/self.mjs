@@ -1,5 +1,5 @@
 /**
- * `secure-npm doctor | log | policy | version`.
+ * `secure-npm doctor | edit-policy | log | policy | version`.
  *
  * doctor exists because every layer here fails open when it is not wired up:
  * a shim that is not on PATH, a pnpm config that was overwritten, an .npmrc
@@ -10,19 +10,24 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { spawnSync } from 'node:child_process';
 import { loadPolicy } from './policy.mjs';
 import { pruneAuditLog } from './logger.mjs';
+import { runtimeStatus } from './runtime.mjs';
 import { findManager } from './which.mjs';
 import {
+    IS_WINDOWS,
     auditLogFile,
     binDir,
+    configDir,
     entryPoint,
-    installRoot,
     localPolicyFile,
+    moduleRoot,
     npmUserConfigFile,
     pnpmConfigFile,
     pnpmHookFile,
     policyFile,
+    runtimeRoot,
     shimMarkerFile,
 } from './paths.mjs';
 
@@ -41,6 +46,36 @@ function pathContainsBinDir() {
         .some(entry => path.resolve(entry.replace(/^"|"$/g, '')).toLowerCase() === target);
 }
 
+/**
+ * The deployed runtime is the one thing here with no equivalent of its own
+ * error message: a copy that has fallen behind its source enforces yesterday's
+ * policy perfectly happily, and says nothing at all about it.
+ */
+function reportRuntime(fail) {
+    const { state, stamp } = runtimeStatus();
+
+    if (state === 'missing') {
+        fail('runtime deployed', `missing: ${runtimeRoot} — run "node install.mjs" from the repository`);
+        return;
+    }
+
+    if (state === 'unstamped') {
+        fail('runtime deployed', `${runtimeRoot} carries no stamp — re-run "node install.mjs"`);
+        return;
+    }
+
+    if (state === 'stale') {
+        line(OK, 'runtime deployed', runtimeRoot);
+        fail('runtime up to date', `the source has changed — run "node ${path.join(stamp.source, 'install.mjs')}"`);
+        return;
+    }
+
+    line(OK, 'runtime deployed', `${runtimeRoot} (v${stamp.version}, ${stamp.deployedAt})`);
+    state === 'source-gone'
+        ? line(MEH, 'runtime source', `no longer at ${stamp.source} — updates cannot be checked`)
+        : line(OK, 'runtime source', stamp.source);
+}
+
 function doctor() {
     const policy = loadPolicy();
     let failures = 0;
@@ -49,10 +84,14 @@ function doctor() {
         line(BAD, label, detail);
     };
 
-    process.stdout.write(`\nsecure-npm doctor — install root ${installRoot}\n\n`);
+    process.stdout.write(`\nsecure-npm doctor — running from ${moduleRoot}\n\n`);
+
+    reportRuntime(fail);
 
     fs.existsSync(policyFile) ? line(OK, 'policy file', policyFile) : fail('policy file', `missing: ${policyFile}`);
-    if (fs.existsSync(localPolicyFile)) line(OK, 'local policy overlay', localPolicyFile);
+    fs.existsSync(localPolicyFile)
+        ? line(OK, 'local policy overlay', localPolicyFile)
+        : line(OK, 'local policy overlay', 'none — "secure-npm edit-policy" creates one');
 
     line(
         OK,
@@ -75,6 +114,15 @@ function doctor() {
     fs.existsSync(shimMarkerFile)
         ? line(OK, 'shim directory', binDir)
         : fail('shim directory', `not installed: ${binDir} — run "node install.mjs"`);
+
+    // Shims written before the runtime was deployed still start the repository
+    // copy, which keeps working right up until the clone moves.
+    const shimFile = path.join(binDir, IS_WINDOWS ? 'npm.cmd' : 'npm');
+    if (fs.existsSync(shimFile)) {
+        fs.readFileSync(shimFile, 'utf8').includes(entryPoint)
+            ? line(OK, 'shims start the runtime', entryPoint)
+            : fail('shims start the runtime', `${shimFile} points elsewhere — re-run "node install.mjs"`);
+    }
 
     pathContainsBinDir()
         ? line(OK, 'shim directory on PATH', 'yes')
@@ -185,8 +233,92 @@ function showPolicy() {
 
 function showVersion() {
     const require = createRequire(import.meta.url);
-    const { name, version } = require(path.join(installRoot, 'package.json'));
-    process.stdout.write(`${name} ${version}\n  root ${installRoot}\n  entry ${entryPoint}\n`);
+    const { name, version } = require(path.join(moduleRoot, 'package.json'));
+    process.stdout.write(`${name} ${version}\n  root ${moduleRoot}\n  entry ${entryPoint}\n`);
+    return 0;
+}
+
+/* -------------------------------------------------------------- edit-policy */
+
+/**
+ * Seeded rather than left empty, because the merge is shallow and that is not
+ * the obvious half of it: a key written here replaces the shared value outright
+ * instead of adding to it. `$` keys are ignored by the compiler, so the examples
+ * document the shape without quietly taking effect.
+ */
+const OVERLAY_TEMPLATE = {
+    $comment: [
+        'Machine-local policy overlay, shallow-merged on top of the shared policy.json.',
+        'A key set here REPLACES the shared value, it does not extend it.',
+        'Keys starting with $ are ignored — rename an example to switch it on.',
+        'Re-run "node install.mjs" from the repository afterwards: pnpm reads its own',
+        'copy of these settings, generated at install time.',
+    ],
+    $examples: {
+        minimumReleaseAgeMinutes: 4320,
+        minimumReleaseAgeExclude: ['some-package', 'other-package@1.2.3'],
+        allowedGitSources: ['github.com/safari-digital/*'],
+        allowExoticSources: false,
+    },
+};
+
+/**
+ * $VISUAL / $EDITOR first, and waited on: a terminal editor needs the terminal,
+ * and blocking is what makes it possible to check the file once it closes.
+ * The desktop handler is the fallback and returns immediately, so nothing can
+ * be validated in that case.
+ */
+function openEditor(file) {
+    const editor = process.env.VISUAL || process.env.EDITOR;
+    const target = `"${file}"`;
+
+    const command = editor
+        ? `${editor} ${target}`
+        : IS_WINDOWS
+          ? `start "" ${target}`
+          : process.platform === 'darwin'
+            ? `open ${target}`
+            : `xdg-open ${target}`;
+
+    const { error } = spawnSync(command, { shell: true, stdio: 'inherit' });
+
+    return { launched: !error, waited: Boolean(editor), command };
+}
+
+function editPolicy() {
+    fs.mkdirSync(configDir, { recursive: true });
+
+    const created = !fs.existsSync(localPolicyFile);
+    if (created) fs.writeFileSync(localPolicyFile, `${JSON.stringify(OVERLAY_TEMPLATE, null, 4)}\n`);
+
+    process.stdout.write(`${created ? 'created' : 'editing'} ${localPolicyFile}\n`);
+
+    const { launched, waited, command } = openEditor(localPolicyFile);
+    if (!launched) {
+        process.stdout.write(`could not start an editor (${command}) — open the file above yourself\n`);
+        return 0;
+    }
+
+    if (!waited) {
+        process.stdout.write('run "secure-npm doctor" once you are done to check the result\n');
+        return 0;
+    }
+
+    // An overlay that does not parse takes every npm and pnpm command down with
+    // it, so it is worth catching here rather than on the next install.
+    try {
+        JSON.parse(fs.readFileSync(localPolicyFile, 'utf8'));
+    } catch (error) {
+        process.stderr.write(`\nthis file is not valid JSON — every npm and pnpm command will fail until it is\n`);
+        process.stderr.write(`  ${error.message}\n`);
+        return 1;
+    }
+
+    const { stamp } = runtimeStatus();
+    const installer = stamp?.source ? path.join(stamp.source, 'install.mjs') : 'install.mjs';
+    process.stdout.write(`\npnpm keeps its own copy of the release-age, trust and exotic-source settings.\n`);
+    process.stdout.write(`If you changed any of those, re-run "node ${installer}", then "secure-npm doctor".\n`);
+
     return 0;
 }
 
@@ -197,6 +329,8 @@ export function runSelfCommand(command, argv) {
             pruneAuditLog(loadPolicy().logRetentionDays);
             return code;
         }
+        case 'edit-policy':
+            return editPolicy();
         case 'log':
             return showLog(argv);
         case 'policy':

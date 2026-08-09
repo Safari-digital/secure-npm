@@ -2,7 +2,8 @@
 /**
  * Removes everything install.mjs put in place. Only files carrying the managed
  * marker are touched, so an .npmrc with credentials or a pnpm config someone
- * has since edited by hand survives.
+ * has since edited by hand survives — and so does anything hand-written: the
+ * policy overlay, the audit log and the cache are left where they are.
  *
  * Usage: node uninstall.mjs [--set-path]
  */
@@ -11,7 +12,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { IS_WINDOWS, binDir, npmUserConfigFile, pnpmConfigFile } from './src/paths.mjs';
+import { IS_WINDOWS, binDir, localPolicyFile, npmUserConfigFile, pnpmConfigFile, runtimeRoot } from './src/paths.mjs';
 import { columns, styleFor } from './src/style.mjs';
 
 const BLOCK_BEGIN = '# >>> secure-npm >>>';
@@ -45,6 +46,12 @@ function removeShims() {
     if (!fs.existsSync(binDir)) return;
     fs.rmSync(binDir, { recursive: true, force: true });
     report('shims', `${binDir} ${dim('(removed)')}`);
+}
+
+function removeRuntime() {
+    if (!fs.existsSync(runtimeRoot)) return;
+    fs.rmSync(runtimeRoot, { recursive: true, force: true });
+    report('runtime', `${runtimeRoot} ${dim('(removed)')}`);
 }
 
 function removePnpmConfig() {
@@ -101,11 +108,13 @@ function removePathPosix() {
     }
 }
 
+removeRuntime();
 removeShims();
 removePnpmConfig();
 removeNpmrcBlock();
 if (wantsPath) (IS_WINDOWS ? removePathWindows : removePathPosix)();
 
+if (fs.existsSync(localPolicyFile)) report('local policy', `${localPolicyFile} ${dim('(hand-written, left alone)')}`);
 if (!wantsPath) report('note', 'PATH was left alone — re-run with --set-path to clean it too');
 
 process.stdout.write(`\n${bold('secure-npm uninstaller')}\n\n`);
