@@ -11,12 +11,19 @@
  * the hook, so the malicious-package list can be fetched from here; it is
  * loaded on the first package rather than at import time, because pnpm loads
  * this file for commands that resolve nothing at all.
+ *
+ * `afterAllResolved` enforces no policy. It undoes a side effect of this very
+ * file: pnpm stamps a `pnpmfileChecksum` into the lockfile because a pnpmfile
+ * exports hooks, and with only a global one the value hashes no file at all.
+ * Being loaded by every pnpm there is — including the ones the wrapper never
+ * sees — this is where that stamp can be taken back off. See pnpm-checksum.mjs.
  */
 
 import { audit, banner, reportBlock } from '../src/logger.mjs';
 import { loadPolicy } from '../src/policy.mjs';
 import { localPolicyFile, policyFile } from '../src/paths.mjs';
 import { compromisedListViolation, compromisedReason, loadCompromisedList } from '../src/compromised.mjs';
+import { dropPhantomPnpmfileChecksum } from '../src/pnpm-checksum.mjs';
 import {
     INSTALLED_FIELDS,
     blockedPackageReason,
@@ -140,4 +147,32 @@ async function readPackage(pkg) {
     return pkg;
 }
 
-export const hooks = { readPackage };
+/**
+ * The last thing pnpm hands over before writing the lockfile. Nothing here
+ * judges anything: it takes the wrapper's own footprint back out of a file the
+ * repository has committed, so an install run here leaves the lockfile exactly
+ * as an install run without secure-npm would.
+ *
+ * A throw would abort the install, and a checksum left in place is a nuisance
+ * and not a danger — so this never refuses, whatever it is given.
+ */
+function afterAllResolved(lockfile) {
+    try {
+        if (dropPhantomPnpmfileChecksum(lockfile)) {
+            audit({
+                event: 'fix',
+                phase: 'pnpm-hook',
+                rule: 'phantom-pnpmfile-checksum',
+                command: 'pnpm (resolution hook)',
+                reason: 'dropped the empty pnpmfileChecksum pnpm stamps for a global-only hook',
+                cwd: process.cwd(),
+            });
+        }
+    } catch {
+        // Nothing to do about it, and not worth failing an install over.
+    }
+
+    return lockfile;
+}
+
+export const hooks = { readPackage, afterAllResolved };

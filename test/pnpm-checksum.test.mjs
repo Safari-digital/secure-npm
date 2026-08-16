@@ -2,10 +2,11 @@
  * The pnpmfileChecksum workaround, pinned down.
  *
  * pnpm stamps the hash of the empty string into a lockfile whenever a global
- * pnpmfile is wired up but no local one feeds the digest. These tests fix both
- * halves of the response: knowing which installs run frozen (so the inert hook
- * is dropped), and stripping that one phantom value back out — and only that
- * one — when a resolving install writes it.
+ * pnpmfile is wired up but no local one feeds the digest. These tests fix all
+ * three parts of the response: keeping that value out of the lockfile pnpm is
+ * about to write, stripping it back out of one that already carries it, and
+ * knowing which installs run frozen (so the inert hook is dropped). Only ever
+ * that one phantom value — a real local pnpmfile's digest is left alone.
  */
 
 import assert from 'node:assert/strict';
@@ -15,10 +16,12 @@ import path from 'node:path';
 import test, { after } from 'node:test';
 import {
     EMPTY_PNPMFILE_CHECKSUM,
+    dropPhantomPnpmfileChecksum,
     frozenLockfileInstall,
     stripPhantomPnpmfileChecksum,
     withGlobalPnpmfileDisabled,
 } from '../src/pnpm-checksum.mjs';
+import { policyFile } from '../src/paths.mjs';
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'secure-npm-checksum-'));
 after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -32,6 +35,42 @@ function lockfile(name, contents) {
 
 test('the empty checksum is the hash pnpm stamps with no file to digest', () => {
     assert.equal(EMPTY_PNPMFILE_CHECKSUM, 'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=');
+});
+
+test('drops the phantom checksum from the lockfile pnpm is about to write', () => {
+    const lockfile = { lockfileVersion: '9.0', pnpmfileChecksum: EMPTY_PNPMFILE_CHECKSUM, importers: {} };
+
+    assert.equal(dropPhantomPnpmfileChecksum(lockfile), true);
+    assert.ok(!('pnpmfileChecksum' in lockfile));
+    assert.deepEqual(Object.keys(lockfile), ['lockfileVersion', 'importers']);
+});
+
+test('leaves a real local pnpmfile, or no checksum at all, alone', () => {
+    const real = { pnpmfileChecksum: 'sha256-aRealDigestOfAnActualLocalPnpmfile=' };
+    assert.equal(dropPhantomPnpmfileChecksum(real), false);
+    assert.equal(real.pnpmfileChecksum, 'sha256-aRealDigestOfAnActualLocalPnpmfile=');
+
+    assert.equal(dropPhantomPnpmfileChecksum({ lockfileVersion: '9.0' }), false);
+    assert.equal(dropPhantomPnpmfileChecksum(null), false);
+    assert.equal(dropPhantomPnpmfileChecksum(undefined), false);
+});
+
+// The point of the exercise: the drop has to be wired into the hook itself,
+// because that is the only part of secure-npm a directly-invoked pnpm loads.
+test('the pnpm hook wires the drop into afterAllResolved', async () => {
+    // Suppresses the banner the hook prints when it believes it is on its own.
+    process.env.SECURE_NPM_POLICY = policyFile;
+    const { hooks } = await import('../hooks/pnpmfile.mjs');
+
+    assert.equal(typeof hooks.afterAllResolved, 'function');
+
+    const lockfile = { lockfileVersion: '9.0', pnpmfileChecksum: EMPTY_PNPMFILE_CHECKSUM };
+    assert.equal(hooks.afterAllResolved(lockfile), lockfile);
+    assert.ok(!('pnpmfileChecksum' in lockfile));
+
+    // Never a reason to fail an install, whatever pnpm hands it.
+    assert.doesNotThrow(() => hooks.afterAllResolved(undefined));
+    assert.doesNotThrow(() => hooks.afterAllResolved(Object.freeze({ pnpmfileChecksum: EMPTY_PNPMFILE_CHECKSUM })));
 });
 
 test('ci and its aliases are frozen, whatever the environment', () => {

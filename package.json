@@ -1,6 +1,6 @@
 {
     "name": "@digital-net-org/secure-npm",
-    "version": "1.1.1",
+    "version": "1.1.2",
     "description": "Supply-chain guard rails around npm and pnpm. Rejects every other JS package manager.",
     "type": "module",
     "license": "MIT",

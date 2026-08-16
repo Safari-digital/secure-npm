@@ -18,16 +18,26 @@
  * checksum, and `pnpm ci` here aborts on `ERR_PNPM_LOCKFILE_CONFIG_MISMATCH`
  * over a value that pins nothing and hashes no file.
  *
- * Two halves, mirror images of each other:
+ * Three pieces, the first of which does the real work:
  *
+ *   - a resolving install runs the hook, so the field is dropped from the
+ *     lockfile pnpm is about to write, from inside `afterAllResolved`
+ *     (`dropPhantomPnpmfileChecksum`). That is the one place that holds
+ *     whatever started pnpm: the wrapper cannot see a pnpm the user invoked by
+ *     its absolute path, nor the pnpm a lifecycle script spawns — pnpm puts its
+ *     own directory ahead of the shims on PATH — but the global pnpmfile is
+ *     loaded by every one of them,
+ *   - the wrapper strips the same value out of a lockfile that already carries
+ *     it (`stripPhantomPnpmfileChecksum`), which cleans up what was committed
+ *     before this, and covers any path that writes the lockfile without calling
+ *     the hook,
  *   - a frozen install links straight from the lockfile and never calls the
- *     hook, so it is handed the command with the global pnpmfile switched off
- *     (`frozenLockfileInstall` + `withGlobalPnpmfileDisabled`); the wrapper's
- *     own lockfile pass is the check that matters there,
- *   - a resolving install *does* run the hook, and pnpm then writes the empty
- *     checksum into the lockfile; left there and committed it breaks frozen
- *     installs for everyone without secure-npm, so it is stripped back out
- *     (`stripPhantomPnpmfileChecksum`).
+ *     hook at all, so the wrapper hands the command over with the global
+ *     pnpmfile switched off (`frozenLockfileInstall` +
+ *     `withGlobalPnpmfileDisabled`); its own lockfile pass is the check that
+ *     matters there. A frozen install started outside the wrapper still hits
+ *     `ERR_PNPM_LOCKFILE_CONFIG_MISMATCH`, and nothing loaded by pnpm can
+ *     prevent it: the comparison is over by the time a hook is called.
  *
  * All of this can be deleted the day pnpm records `undefined` for an empty file
  * set, or offers a global hook that stays out of the checksum entirely.
@@ -93,6 +103,29 @@ export function withGlobalPnpmfileDisabled(argv) {
     return separator === -1
         ? [...argv, flag]
         : [...argv.slice(0, separator), flag, ...argv.slice(separator)];
+}
+
+/**
+ * Drops the phantom checksum from the lockfile object pnpm is about to write.
+ *
+ * Called from the hook's `afterAllResolved`, which pnpm hands the finished
+ * lockfile with `pnpmfileChecksum` already set — so deleting the key here is
+ * enough, and the file is written without it. Nothing else is touched: a real
+ * local `.pnpmfile.cjs` digests to a different value and is left alone, and so
+ * is a lockfile pnpm gave no checksum at all.
+ *
+ * The value cannot collide with a genuine one. An empty local pnpmfile exports
+ * no hooks, and pnpm then computes no checksum whatsoever, so this exact digest
+ * only ever comes from a file set that is empty.
+ *
+ * @param {Object} lockfile The lockfile object, mutated in place.
+ * @returns {boolean} Whether the field was dropped.
+ */
+export function dropPhantomPnpmfileChecksum(lockfile) {
+    if (!lockfile || lockfile.pnpmfileChecksum !== EMPTY_PNPMFILE_CHECKSUM) return false;
+
+    delete lockfile.pnpmfileChecksum;
+    return true;
 }
 
 /** Line equality that tolerates a trailing CR, so CRLF lockfiles match too. */
