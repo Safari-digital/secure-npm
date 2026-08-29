@@ -2,7 +2,7 @@
  * The parsers, pinned down.
  *
  * These files are machine-written by two package managers across five lockfile
- * formats, and every one of them is read here by hand — a key format that moves
+ * formats, and every one of them is read here by hand - a key format that moves
  * would otherwise index to nothing at all, which is indistinguishable from a
  * clean tree. Ported alongside the parsers themselves, from Safari Digital's
  * node-packages-validator.
@@ -13,7 +13,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test, { after } from 'node:test';
-import { findIndexableFiles, indexFile, indexManifest, indexNpmLock, indexPnpmLock } from '../src/lockfile.mjs';
+import LockFiles from '../src/guards/LockFiles.mjs';
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'secure-npm-lockfile-'));
 after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -135,7 +135,7 @@ const manifest = fixture(
 fixture('manifest', 'unknown.txt', 'not a lockfile\n');
 
 test('resolves npm lockfile paths back to package names', () => {
-    const index = indexNpmLock(npmLock);
+    const index = LockFiles.indexNpmLock(npmLock);
 
     assert.deepEqual(Object.keys(index).sort(), ['@scope/tool', 'debug', 'left-pad', 'real-package']);
     assert.deepEqual(versions(index, 'left-pad'), ['1.3.0']);
@@ -143,32 +143,32 @@ test('resolves npm lockfile paths back to package names', () => {
 });
 
 test('keeps every version of a package installed more than once', () => {
-    assert.deepEqual(versions(indexNpmLock(npmLock), 'debug'), ['4.3.4', '4.4.1']);
+    assert.deepEqual(versions(LockFiles.indexNpmLock(npmLock), 'debug'), ['4.3.4', '4.4.1']);
 });
 
 test('follows npm aliases to the real package name', () => {
-    const index = indexNpmLock(npmLock);
+    const index = LockFiles.indexNpmLock(npmLock);
 
     assert.deepEqual(versions(index, 'real-package'), ['9.9.9']);
     assert.equal(index.aliased, undefined);
 });
 
 test('ignores the root project and workspace links', () => {
-    const index = indexNpmLock(npmLock);
+    const index = LockFiles.indexNpmLock(npmLock);
 
     assert.equal(index['npm-fixture'], undefined);
     assert.equal(index['workspace-pkg'], undefined);
 });
 
 test('reads the legacy npm dependencies tree', () => {
-    const index = indexNpmLock(npmLegacyLock);
+    const index = LockFiles.indexNpmLock(npmLegacyLock);
 
     assert.deepEqual(Object.keys(index).sort(), ['debug', 'left-pad']);
     assert.deepEqual(versions(index, 'debug'), ['4.3.4', '4.4.1']);
 });
 
 test('indexes scoped, plain and peer-suffixed pnpm keys', () => {
-    const index = indexPnpmLock(pnpmLock);
+    const index = LockFiles.indexPnpmLock(pnpmLock);
 
     assert.deepEqual(versions(index, '@scope/tool'), ['2.0.0']);
     assert.deepEqual(versions(index, 'left-pad'), ['1.3.0']);
@@ -176,26 +176,26 @@ test('indexes scoped, plain and peer-suffixed pnpm keys', () => {
 });
 
 test('keeps every version of a pnpm lockfile', () => {
-    assert.deepEqual(versions(indexPnpmLock(pnpmLock), 'debug'), ['4.3.4', '4.4.1']);
+    assert.deepEqual(versions(LockFiles.indexPnpmLock(pnpmLock), 'debug'), ['4.3.4', '4.4.1']);
 });
 
 test('captures pnpm tarball resolutions', () => {
-    assert.equal(indexPnpmLock(pnpmLock).tarballed[0].resolved, 'https://example.com/tarballed-1.0.0.tgz');
+    assert.equal(LockFiles.indexPnpmLock(pnpmLock).tarballed[0].resolved, 'https://example.com/tarballed-1.0.0.tgz');
 });
 
 test('stops indexing at the end of the packages section', () => {
-    assert.equal(indexPnpmLock(pnpmLock)['only-in-snapshots'], undefined);
+    assert.equal(LockFiles.indexPnpmLock(pnpmLock)['only-in-snapshots'], undefined);
 });
 
 test('reads legacy pnpm keys', () => {
-    const index = indexPnpmLock(pnpmLegacyLock);
+    const index = LockFiles.indexPnpmLock(pnpmLegacyLock);
 
     assert.deepEqual(Object.keys(index).sort(), ['@scope/tool', 'debug', 'vue-eslint-parser']);
     assert.deepEqual(versions(index, 'vue-eslint-parser'), ['9.0.0']);
 });
 
 test('strips range operators declared in a package.json', () => {
-    const index = indexManifest(manifest);
+    const index = LockFiles.indexManifest(manifest);
 
     assert.deepEqual(versions(index, 'left-pad'), ['1.3.0']);
     assert.deepEqual(versions(index, '@scope/tool'), ['2.0.0']);
@@ -204,14 +204,14 @@ test('strips range operators declared in a package.json', () => {
 });
 
 test('picks the parser from the file name', () => {
-    assert.ok(indexFile(pnpmLock).debug);
-    assert.ok(indexFile(npmLock).debug);
-    assert.ok(indexFile(manifest).debug);
-    assert.deepEqual(indexFile(path.join(root, 'manifest', 'unknown.txt')), {});
+    assert.ok(LockFiles.indexFile(pnpmLock).debug);
+    assert.ok(LockFiles.indexFile(npmLock).debug);
+    assert.ok(LockFiles.indexFile(manifest).debug);
+    assert.deepEqual(LockFiles.indexFile(path.join(root, 'manifest', 'unknown.txt')), {});
 });
 
 test('walks a repository for every indexable file', () => {
-    const found = findIndexableFiles(root).map(file => path.basename(file));
+    const found = LockFiles.findIndexableFiles(root).map(file => path.basename(file));
 
     assert.equal(found.length, 5);
     assert.equal(found.filter(name => name === 'package-lock.json').length, 2);

@@ -18,6 +18,7 @@ export const MODULE_ROOT_PATH           = path.resolve(fileURLToPath(import.meta
 export const APP_PATH                   = IS_WINDOWS ? WINDOWS_APP_PATH : path.join(OS_DATA_HOME_PATH, APP_NAME);
 export const APP_RUNTIME_DIR            = path.join(APP_PATH, 'runtime');
 export const APP_RUNTIME_STAMP_FILE     = path.join(APP_RUNTIME_DIR, `.${APP_NAME}-runtime`);
+export const APP_SOURCE_DIR             = path.join(APP_PATH, 'source');
 export const APP_BIN_DIR                = path.join(APP_PATH, 'bin');
 export const APP_SHIM_MARKER_FILE       = path.join(APP_BIN_DIR, `.${APP_NAME}-shims`);
 export const APP_CONFIG_DIR             = IS_WINDOWS ? WINDOWS_APP_PATH : path.join(OS_CONFIG_PATH, APP_NAME);

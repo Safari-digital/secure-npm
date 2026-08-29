@@ -23,62 +23,58 @@ export default class Logger {
         prompt.on('close', () => resolve(''));
     });
 
-    /** @param {string} line **/
-    static #emit = (line) => void stderr.write(`${line}\n`);
-
+    /** One field line, gutter-aligned and newline-terminated, ready to write. **/
     static #field(label, value) {
         const { dim } = this.#stylesErr;
-        return `${dim(`${this.#GUTTER}${label.padEnd(9)}`)}${value}`;
+        return `${dim(`${this.#GUTTER}${label.padEnd(9)}`)}${value}\n`;
     }
 
     /** @param {{ command: string, policyFiles: string[], hookFile?: string, action?: string, extras?: Object }} _ **/
     static banner({ command, policyFiles, hookFile, action = 'Securely running', extras = {} }) {
         const { dim, bold, green } = this.#stylesErr;
-        this.#emit(`${green('▸')} ${bold(this.#TAG)}  ${action} ${bold(command)}`);
-        this.#emit(this.#field('policy', policyFiles.join(dim(' + '))));
-        if (hookFile) this.#emit(this.#field('hook', hookFile));
-        for (const [label, value] of Object.entries(extras)) this.#emit(this.#field(label, value));
-        this.#emit(this.#field('audit', APP_AUDIT_LOG_FILE));
+        this.writeErr(`${green('▸')} ${bold(this.#TAG)}  ${action} ${bold(command)}\n`);
+        this.writeErr(this.#field('policy', policyFiles.join(dim(' + '))));
+        if (hookFile) this.writeErr(this.#field('hook', hookFile));
+        for (const [label, value] of Object.entries(extras)) this.writeErr(this.#field(label, value));
+        this.writeErr(this.#field('audit', APP_AUDIT_LOG_FILE));
     }
 
     /** @param {{ rule: string, subject: string, reason: string, hint?: string }} _ **/
     static reportBlock({ rule, subject, reason, hint }) {
         const { bold, red } = this.#stylesErr;
-        this.#emit('');
-        this.#emit(`${red('✖')} ${bold(this.#TAG)}  ${red(bold('BLOCKED'))}  ${subject}`);
-        this.#emit(this.#field('rule', rule));
-        this.#emit(this.#field('reason', reason));
-        if (hint) this.#emit(this.#field('hint', hint));
-        this.#emit('');
+        this.writeErr(`\n${red('✖')} ${bold(this.#TAG)}  ${red(bold('BLOCKED'))}  ${subject}\n`);
+        this.writeErr(this.#field('rule', rule));
+        this.writeErr(this.#field('reason', reason));
+        if (hint) this.writeErr(this.#field('hint', hint));
+        this.writeErr('\n');
     }
 
     /** @param {{ rule: string, title: string, entries: string[], hint?: string }} _ **/
     static reportBlocks({ rule, title, entries, hint }) {
         const { bold, red } = this.#stylesErr;
-        this.#emit('');
-        this.#emit(`${red('✖')} ${bold(this.#TAG)}  ${red(bold('BLOCKED'))}  ${title}`);
-        this.#emit(this.#field('rule', rule));
-        for (const entry of entries) this.#emit(this.#field('', entry));
-        if (hint) this.#emit(this.#field('hint', hint));
-        this.#emit('');
+        this.writeErr(`\n${red('✖')} ${bold(this.#TAG)}  ${red(bold('BLOCKED'))}  ${title}\n`);
+        this.writeErr(this.#field('rule', rule));
+        for (const entry of entries) this.writeErr(this.#field('', entry));
+        if (hint) this.writeErr(this.#field('hint', hint));
+        this.writeErr('\n');
     }
 
     /** @param {string} message **/
     static warn(message) {
         const { bold, yellow } = this.#stylesErr;
-        this.#emit(`${yellow('!')} ${bold(this.#TAG)}  ${message}`);
+        this.writeErr(`${yellow('!')} ${bold(this.#TAG)}  ${message}\n`);
     }
 
     /** @param {string} message **/
     static info(message) {
         const { dim, bold } = this.#stylesErr;
-        this.#emit(`${dim('·')} ${bold(this.#TAG)}  ${dim(message)}`);
+        this.writeErr(`${dim('·')} ${bold(this.#TAG)}  ${dim(message)}\n`);
     }
 
     /** @param {string} message **/
     static checked(message) {
         const { bold, green } = this.#stylesErr;
-        this.#emit(`${green('✓')} ${bold(this.#TAG)}  ${message}`);
+        this.writeErr(`${green('✓')} ${bold(this.#TAG)}  ${message}\n`);
     }
 
     /** @param {Object} entry **/

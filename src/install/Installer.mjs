@@ -16,8 +16,8 @@ import {
     PNPM_HOOK_FILE,
     RUNTIME_POLICY_FILE
 } from "../paths.mjs";
-import { DEPLOYED, fingerprint } from "../runtime.mjs";
-import { loadPolicy } from "../policy.mjs";
+import Runtime from "./Runtime.mjs";
+import Policy from "../policy/Policy.mjs";
 import Logger from "../logs/Logger.mjs";
 
 export default class Installer {
@@ -61,7 +61,7 @@ export default class Installer {
         if (!proceed) return;
 
         // Read from the repository, which is the source of truth at install time.
-        const policy = loadPolicy();
+        const policy = Policy.load();
         this.#installRuntime();
         this.#installShims(policy);
         this.#installPnpmConfig(policy);
@@ -119,11 +119,19 @@ export default class Installer {
         return false;
     }
 
+    static #gitAnswer(args) {
+        try {
+            return execFileSync('git', ['-C', MODULE_ROOT_PATH, ...args], { encoding: 'utf8' }).trim() || null;
+        } catch {
+            return null;
+        }
+    }
+
     /** @returns {undefined} **/
     static #installRuntime() {
         const { dim } = Logger.styles;
 
-        for (const entry of DEPLOYED) {
+        for (const entry of Runtime.DEPLOYED) {
             const from = path.join(MODULE_ROOT_PATH, entry);
             if (!fs.existsSync(from))
                 throw new Error(`cannot deploy the runtime: ${from} is missing`);
@@ -132,7 +140,7 @@ export default class Installer {
         fs.rmSync(APP_RUNTIME_DIR, { recursive: true, force: true });
         fs.mkdirSync(APP_RUNTIME_DIR, { recursive: true });
 
-        for (const entry of DEPLOYED) {
+        for (const entry of Runtime.DEPLOYED) {
             fs.cpSync(
                 path.join(MODULE_ROOT_PATH, entry),
                 path.join(APP_RUNTIME_DIR, entry),
@@ -140,12 +148,17 @@ export default class Installer {
             );
         }
 
-        const { version } = JSON.parse(fs.readFileSync(path.join(MODULE_ROOT_PATH, 'package.json'), 'utf8'));
+        const { version, repository } = JSON.parse(fs.readFileSync(path.join(MODULE_ROOT_PATH, 'package.json'), 'utf8'));
+
+        // Commit and origin let `secure-npm --update` compare and re-clone
+        // without the source tree; null when it was not a git checkout.
         const stamp = {
             source: MODULE_ROOT_PATH,
             version,
+            commit: this.#gitAnswer(['rev-parse', 'HEAD']),
+            repository: this.#gitAnswer(['remote', 'get-url', 'origin']) ?? repository?.url ?? null,
             deployedAt: new Date().toISOString(),
-            fingerprint: fingerprint(APP_RUNTIME_DIR),
+            fingerprint: Runtime.fingerprint(APP_RUNTIME_DIR),
         };
 
         fs.writeFileSync(APP_RUNTIME_STAMP_FILE, `${JSON.stringify(stamp, null, 4)}\n`);
@@ -231,7 +244,7 @@ export default class Installer {
     static #pnpmConfigContents(policy) {
         const exclude = [...policy.minimumReleaseAgeExclude];
         return [
-            `# ${this.#MANAGED_MARKER} — ${this.#REGENERATE_HINT}`,
+            `# ${this.#MANAGED_MARKER} - ${this.#REGENERATE_HINT}`,
             `# Source of truth: ${RUNTIME_POLICY_FILE}, overlaid with ${LOCAL_POLICY_FILE}`,
             '#',
             '# Applies to every pnpm project on this machine, including projects with no',
@@ -277,7 +290,7 @@ export default class Installer {
             if (!existing.includes(this.#MANAGED_MARKER)) {
                 const backup = `${PNPM_CONFIG_FILE}.bak-${Date.now()}`;
                 fs.copyFileSync(PNPM_CONFIG_FILE, backup);
-                this.#note(`existing pnpm config was not written by this tool — backed up to ${backup}`);
+                this.#note(`existing pnpm config was not written by this tool - backed up to ${backup}`);
             }
         }
 
@@ -337,7 +350,7 @@ export default class Installer {
         const action = this.#upsertManagedBlock(
             NPM_USR_CONFIG_FILE,
             [
-                `# ${this.#MANAGED_MARKER} — ${this.#REGENERATE_HINT}`,
+                `# ${this.#MANAGED_MARKER} - ${this.#REGENERATE_HINT}`,
                 '# npm has no release-age or provenance setting; the wrapper enforces those.',
                 '# This line is the part npm can enforce by itself, and it keeps holding even',
                 '# when npm is invoked by a tool that never sees the shim.',
@@ -414,7 +427,7 @@ export default class Installer {
 
     static #installPathPosix() {
         const body = [
-            `# ${this.#MANAGED_MARKER} — ${this.#REGENERATE_HINT}`,
+            `# ${this.#MANAGED_MARKER} - ${this.#REGENERATE_HINT}`,
             `export PATH="${APP_BIN_DIR}:$PATH"`
         ].join('\n');
 

@@ -2,6 +2,10 @@
     "name": "@digital-net-org/secure-npm",
     "version": "1.2.0",
     "description": "Supply-chain guard rails around npm and pnpm. Rejects every other JS package manager.",
+    "repository": {
+        "type": "git",
+        "url": "git@github.com:Safari-digital/secure-npm.git"
+    },
     "type": "module",
     "license": "MIT",
     "engines": {

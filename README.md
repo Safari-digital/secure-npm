@@ -9,17 +9,14 @@
 
 ---
 
-A compromised package hurts at two moments: when its install script runs, and when a freshly published
-malicious version reaches your machine before anyone has noticed. 
+secure-npm wraps npm and pnpm behind a shared supply-chain policy. Installed once per machine, it puts
+shims first on PATH and registers a global pnpm hook, so every install is checked before the real package manager runs:
 
-**pnpm 11** defends against both natively; npm has no release-age check, no provenance check and no resolution hook. 
-Neither of them checks what it is about to install against the packages already known to be malicious.
-
-This repository closes that gap and applies the same rules to both: a version must have existed for three days before it can be installed, a
-version published with weaker guarantees than an earlier one is refused, lifecycle scripts never run, `git:`
-and tarball dependencies are rejected unless the repository is whitelisted, blocked names are refused at any
-depth, packages on [DataDog's malicious-package list](https://github.com/DataDog/malicious-software-packages-dataset)
-are refused at any depth too, and `bun`, `yarn` and `deno` are refused outright.
+- a release must be at least three days old,
+- lifecycle scripts never run,
+- every resolved package is checked, at any depth, against a curated list of known-malicious releases,
+- `git:` and tarball dependencies are refused unless their repository is whitelisted,
+- blocked names are refused everywhere, and `bun`, `yarn` and `deno` are refused outright.
 
 ## Install
 
@@ -29,8 +26,8 @@ Requires Node 20.6+. Clone once per machine, then:
 git clone git@github.com:Safari-digital/secure-npm.git && cd secure-npm && node installer.mjs
 ```
 
-The installer announces everything it is about to touch — including prepending the shim directory to your
-PATH *(on Windows the previous value is backed up next to the shims)* — and waits for a confirmation;
+The installer announces everything it is about to touch - including prepending the shim directory to your
+PATH *(on Windows the previous value is backed up next to the shims)* - and waits for a confirmation;
 pass `-y` to answer it.
 
 | What                  | Where                                                                                    |
@@ -45,8 +42,11 @@ pass `-y` to answer it.
 
 ### Update
 
+The runtime compares itself to the repository recorded at install time and offers to install anything
+newer.
+
 ```bash
-git pull && node installer.mjs -y
+secure-npm --update
 ```
 
 ## Usage
@@ -70,7 +70,7 @@ And when a rule fires, it says which one, on what, and why and then records it:
 ```
 ✖ secure-npm  BLOCKED  2 violations in npm install left-pad
               rule     release-too-recent
-                       left-pad@1.3.1 — published 2026-08-05T09:12:44.001Z — 19h old, minimum is 72h
+                       left-pad@1.3.1 - published 2026-08-05T09:12:44.001Z - 19h old, minimum is 72h
               hint     wait for the version to mature, or pin an older one
 ```
 
@@ -86,8 +86,8 @@ in `package.json`, in either lockfile, and at any depth of the resolved tree:
 ```
 ✖ secure-npm  BLOCKED  1 violation in pnpm install
               rule     compromised-package
-                       02-echo@0.0.7 — pnpm-lock.yaml — this exact version is listed as malicious
-              hint     this package is on the malicious-package list — remove it, do not pin around it
+                       02-echo@0.0.7 - pnpm-lock.yaml - this exact version is listed as malicious
+              hint     this package is on the malicious-package list - remove it, do not pin around it
 ```
 
 The list is fetched once and cached for six hours. When a refresh fails the cached copy is used and said so out
@@ -113,6 +113,8 @@ secure-npm doctor        # check that the guard rails are actually wired up
 secure-npm edit-policy   # open this machine's overrides, creating them if needed
 secure-npm log 20        # recent audit entries
 secure-npm policy        # the effective policy, after the local overlay
+secure-npm --update      # check the repository for a newer version, offer to install it
+secure-npm --uninstall   # remove everything the installer put in place
 ```
 
 ## Configuration
@@ -136,7 +138,7 @@ secure-npm policy        # the effective policy, after the local overlay
 ## Uninstall
 
 ```bash
-node installer.mjs --uninstall
+secure-npm --uninstall
 ```
 
 Removes the deployed runtime and the shims. Beyond those, only files carrying the `managed by secure-npm`
