@@ -16,7 +16,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { abort } from './execute.mjs';
-import { audit, banner, checked, info } from './logger.mjs';
+import Logger from './logs/Logger.mjs';
 import { loadPolicy } from './policy.mjs';
 import { compromisedListViolation, findCompromised, listAge, loadCompromisedList } from './compromised.mjs';
 import {
@@ -28,7 +28,7 @@ import {
     findRepositoryRoot,
     indexFile,
 } from './lockfile.mjs';
-import { localPolicyFile, policyFile } from './paths.mjs';
+import { LOCAL_POLICY_FILE, POLICY_FILE } from './paths.mjs';
 
 export const VALIDATE_USAGE = `secure-npm validate — audit a tree against the malicious-package list
 
@@ -99,14 +99,14 @@ function resolveTargets({ target, monorepo }) {
 
 export async function runValidate(argv, cwd = process.cwd()) {
     if (argv.includes('--help') || argv.includes('-h')) {
-        process.stdout.write(VALIDATE_USAGE);
+        Logger.write(VALIDATE_USAGE);
         return 0;
     }
 
     const flags = new Set(argv.filter(argument => argument.startsWith('-')));
     const unknown = [...flags].filter(flag => flag !== '--monorepo');
     if (unknown.length) {
-        process.stderr.write(`secure-npm validate: unknown option "${unknown[0]}"\n\n${VALIDATE_USAGE}`);
+        Logger.writeErr(`secure-npm validate: unknown option "${unknown[0]}"\n\n${VALIDATE_USAGE}`);
         return 2;
     }
 
@@ -116,7 +116,7 @@ export async function runValidate(argv, cwd = process.cwd()) {
     const resolved = resolveTargets({ target, monorepo: flags.has('--monorepo') });
 
     if (resolved.error) {
-        process.stderr.write(`secure-npm validate: ${resolved.error}\n\n${VALIDATE_USAGE}`);
+        Logger.writeErr(`secure-npm validate: ${resolved.error}\n\n${VALIDATE_USAGE}`);
         return 2;
     }
 
@@ -124,10 +124,10 @@ export async function runValidate(argv, cwd = process.cwd()) {
     const { files, scope } = resolved;
     const context = { command: `secure-npm validate ${positional ?? '.'}`.trim(), cwd };
 
-    banner({
+    Logger.banner({
         action: 'Auditing',
         command: scope,
-        policyFiles: fs.existsSync(localPolicyFile) ? [policyFile, localPolicyFile] : [policyFile],
+        policyFiles: fs.existsSync(LOCAL_POLICY_FILE) ? [POLICY_FILE, LOCAL_POLICY_FILE] : [POLICY_FILE],
         extras: {
             list: policy.compromisedPackagesSource ?? 'none — "compromisedPackagesSource" is not set in policy.json',
             files: String(files.length),
@@ -135,9 +135,9 @@ export async function runValidate(argv, cwd = process.cwd()) {
     });
 
     if (!policy.compromisedPackagesSource) {
-        process.stderr.write(
+        Logger.writeErr(
             '\nsecure-npm validate: there is nothing to validate against.\n' +
-                '  set "compromisedPackagesSource" in policy.json, then re-run "node install.mjs".\n\n'
+                '  set "compromisedPackagesSource" in policy.json, then re-run "node installer.mjs".\n\n'
         );
         return 2;
     }
@@ -146,7 +146,7 @@ export async function runValidate(argv, cwd = process.cwd()) {
     const unavailable = compromisedListViolation(list);
     if (unavailable) return abort({ ...context, phase: 'validate', violations: [unavailable] });
 
-    info(`${list.count} known-malicious package(s), fetched ${listAge(list.fetchedAt)} ago`);
+    Logger.info(`${list.count} known-malicious package(s), fetched ${listAge(list.fetchedAt)} ago`);
 
     const violations = [];
     const hitFiles = new Set();
@@ -188,7 +188,7 @@ export async function runValidate(argv, cwd = process.cwd()) {
 
     if (violations.length) return abort({ ...context, phase: 'validate', violations });
 
-    checked(`no compromised package in ${files.length} file(s)`);
-    audit({ event: 'run', command: context.command, cwd, files, checked: files.length });
+    Logger.checked(`no compromised package in ${files.length} file(s)`);
+    Logger.audit({ event: 'run', command: context.command, cwd, files, checked: files.length });
     return 0;
 }

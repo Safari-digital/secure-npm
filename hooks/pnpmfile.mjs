@@ -19,9 +19,9 @@
  * sees — this is where that stamp can be taken back off. See pnpm-checksum.mjs.
  */
 
-import { audit, banner, reportBlock } from '../src/logger.mjs';
+import Logger from '../src/logs/Logger.mjs';
 import { loadPolicy } from '../src/policy.mjs';
-import { localPolicyFile, policyFile } from '../src/paths.mjs';
+import { LOCAL_POLICY_FILE, POLICY_FILE } from '../src/paths.mjs';
 import { compromisedListViolation, compromisedReason, loadCompromisedList } from '../src/compromised.mjs';
 import { dropPhantomPnpmfileChecksum } from '../src/pnpm-checksum.mjs';
 import {
@@ -40,16 +40,16 @@ const policy = loadPolicy();
 // The wrapper sets this and prints its own banner. When it is absent, pnpm was
 // started outside the shim and this is the only chance to say what is enforced.
 if (!process.env.SECURE_NPM_POLICY) {
-    banner({
+    Logger.banner({
         command: 'pnpm (called directly)',
-        policyFiles: fs.existsSync(localPolicyFile) ? [policyFile, localPolicyFile] : [policyFile],
+        policyFiles: fs.existsSync(LOCAL_POLICY_FILE) ? [POLICY_FILE, LOCAL_POLICY_FILE] : [POLICY_FILE],
         hookFile: fileURLToPath(import.meta.url),
     });
 }
 
 function refuse({ rule, subject, reason, hint, origin }) {
-    reportBlock({ rule, subject, reason, hint });
-    audit({
+    Logger.reportBlock({ rule, subject, reason, hint });
+    Logger.audit({
         event: 'block',
         phase: 'pnpm-hook',
         command: 'pnpm (resolution hook)',
@@ -159,7 +159,7 @@ async function readPackage(pkg) {
 function afterAllResolved(lockfile) {
     try {
         if (dropPhantomPnpmfileChecksum(lockfile)) {
-            audit({
+            Logger.audit({
                 event: 'fix',
                 phase: 'pnpm-hook',
                 rule: 'phantom-pnpmfile-checksum',

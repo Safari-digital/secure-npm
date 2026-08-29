@@ -26,11 +26,12 @@ are refused at any depth too, and `bun`, `yarn` and `deno` are refused outright.
 Requires Node 20.6+. Clone once per machine, then:
 
 ```bash
-git clone git@github.com:Safari-digital/secure-npm.git && cd secure-npm && node install.mjs --set-path
+git clone git@github.com:Safari-digital/secure-npm.git && cd secure-npm && node installer.mjs
 ```
 
-`--set-path` prepends the shim directory to your user PATH *(the previous value is backed up next to the
-shims)*. Drop it to have the installer print the directory and leave PATH alone.
+The installer announces everything it is about to touch — including prepending the shim directory to your
+PATH *(on Windows the previous value is backed up next to the shims)* — and waits for a confirmation;
+pass `-y` to answer it.
 
 | What                  | Where                                                                                    |
 |-----------------------|------------------------------------------------------------------------------------------|
@@ -45,7 +46,7 @@ shims)*. Drop it to have the installer print the directory and leave PATH alone.
 ### Update
 
 ```bash
-git pull && node install.mjs
+git pull && node installer.mjs -y
 ```
 
 ## Usage
@@ -135,7 +136,7 @@ secure-npm policy        # the effective policy, after the local overlay
 ## Uninstall
 
 ```bash
-node uninstall.mjs --set-path
+node installer.mjs --uninstall
 ```
 
 Removes the deployed runtime and the shims. Beyond those, only files carrying the `managed by secure-npm`

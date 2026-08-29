@@ -9,7 +9,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { shimMarkerFile } from './paths.mjs';
+import { APP_SHIM_MARKER_FILE } from './paths.mjs';
 
 const IS_WINDOWS = process.platform === 'win32';
 
@@ -24,7 +24,7 @@ const NODE_ENTRY_POINTS = {
     pnpx: ['node_modules/pnpm/bin/pnpx.cjs'],
 };
 
-const MARKER_NAME = path.basename(shimMarkerFile);
+const MARKER_NAME = path.basename(APP_SHIM_MARKER_FILE);
 
 function isShimDirectory(directory) {
     return fs.existsSync(path.join(directory, MARKER_NAME));

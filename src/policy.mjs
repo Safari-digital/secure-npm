@@ -5,7 +5,7 @@
  */
 
 import fs from 'node:fs';
-import { localPolicyFile, policyFile } from './paths.mjs';
+import { LOCAL_POLICY_FILE, POLICY_FILE } from './paths.mjs';
 
 function readJson(file) {
     if (!fs.existsSync(file)) return null;
@@ -75,12 +75,12 @@ let cached;
 export function loadPolicy() {
     if (cached) return cached;
 
-    const shared = readJson(policyFile);
-    if (!shared) throw new Error(`policy file is missing: ${policyFile}`);
+    const shared = readJson(POLICY_FILE);
+    if (!shared) throw new Error(`policy file is missing: ${POLICY_FILE}`);
 
-    const local = readJson(localPolicyFile);
+    const local = readJson(LOCAL_POLICY_FILE);
     const merged = { ...shared, ...(local ?? {}) };
-    merged.$sources = local ? [policyFile, localPolicyFile] : [policyFile];
+    merged.$sources = local ? [POLICY_FILE, LOCAL_POLICY_FILE] : [POLICY_FILE];
 
     cached = compile(merged);
     return cached;

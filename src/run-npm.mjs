@@ -5,7 +5,7 @@
  * every rule is enforced here, before the real command is allowed to start.
  */
 
-import { audit, banner, checked, info, warn } from './logger.mjs';
+import Logger from './logs/Logger.mjs';
 import { loadPolicy } from './policy.mjs';
 import { abort, delegate } from './execute.mjs';
 import { classify, inspectArgv, unknownCommandReason } from './guard-argv.mjs';
@@ -20,7 +20,7 @@ import {
 import { resolveDistTag } from './registry.mjs';
 import { registryFor } from './rules.mjs';
 import { findManager } from './which.mjs';
-import { policyFile, localPolicyFile } from './paths.mjs';
+import { POLICY_FILE, LOCAL_POLICY_FILE } from './paths.mjs';
 import fs from 'node:fs';
 
 /** npx targets are usually unpinned; resolve the tag so the age check has a version. */
@@ -55,14 +55,14 @@ export async function runNpm({ command, argv, cwd }) {
     const policy = loadPolicy();
     const manager = findManager(command === 'npx' ? 'npx' : 'npm');
 
-    banner({
+    Logger.banner({
         command: `${command} ${argv.join(' ')}`.trim(),
-        policyFiles: fs.existsSync(localPolicyFile) ? [policyFile, localPolicyFile] : [policyFile],
+        policyFiles: fs.existsSync(LOCAL_POLICY_FILE) ? [POLICY_FILE, LOCAL_POLICY_FILE] : [POLICY_FILE],
         extras: manager ? { binary: manager.file } : {},
     });
 
     if (!manager) {
-        warn(`no real ${command} found on PATH — is Node installed outside the shim directory?`);
+        Logger.warn(`no real ${command} found on PATH — is Node installed outside the shim directory?`);
         return 127;
     }
 
@@ -71,9 +71,9 @@ export async function runNpm({ command, argv, cwd }) {
 
     const unknown = unknownCommandReason(command, argv, cwd);
     if (unknown) {
-        warn(unknown.reason);
-        info(unknown.hint);
-        audit({ event: 'warn', rule: 'unknown-command', command, argv, cwd, reason: unknown.reason });
+        Logger.warn(unknown.reason);
+        Logger.info(unknown.hint);
+        Logger.audit({ event: 'warn', rule: 'unknown-command', command, argv, cwd, reason: unknown.reason });
     }
 
     const argvViolations = inspectArgv(policy, command, argv);
@@ -91,7 +91,7 @@ export async function runNpm({ command, argv, cwd }) {
     // is only worth reading next to what it passed against.
     const summary = compromisedListSummary(list);
     const cleared = subject =>
-        checked(
+        Logger.checked(
             summary
                 ? `${subject} cleared the policy and the malicious-package list (${summary})`
                 : `${subject} cleared the policy`
@@ -114,7 +114,7 @@ export async function runNpm({ command, argv, cwd }) {
     // package set, so it is checked directly and the preview is skipped.
     if (subCommand === 'ci' || subCommand === 'clean-install') {
         const { packages: pinned, gitSourced } = lockfilePackages(cwd);
-        info(`checking the ${pinned.length} package(s) pinned in package-lock.json…`);
+        Logger.info(`checking the ${pinned.length} package(s) pinned in package-lock.json…`);
 
         // The malicious-package list is checked by the lockfile pass alone: both
         // passes walk the same entries here, and only that one knows the install
@@ -129,7 +129,7 @@ export async function runNpm({ command, argv, cwd }) {
 
         cleared(`${pinned.length} package(s) pinned in package-lock.json`);
     } else if (isInstall) {
-        info('asking npm what it would install (dry run, nothing is written)…');
+        Logger.info('asking npm what it would install (dry run, nothing is written)…');
         const preview = await previewResolution({ manager, argv, cwd });
 
         if (!preview.ok) {
@@ -148,10 +148,10 @@ export async function runNpm({ command, argv, cwd }) {
         }
 
         if (preview.packages.length === 0) {
-            info('nothing new to resolve');
+            Logger.info('nothing new to resolve');
             // package.json still went past the list, and the lockfile sweep
             // below reads the rest of the tree once npm is done.
-            if (summary) checked(`package.json cleared the malicious-package list (${summary})`);
+            if (summary) Logger.checked(`package.json cleared the malicious-package list (${summary})`);
         } else {
             // Whitelisted git sources cleared the argv and manifest guards
             // above; the age check must not then judge them by the registry.
@@ -173,9 +173,9 @@ export async function runNpm({ command, argv, cwd }) {
             ? [...argv, '--ignore-scripts']
             : argv;
 
-    if (effectiveArgv !== argv) info('lifecycle scripts disabled for this run (--ignore-scripts)');
+    if (effectiveArgv !== argv) Logger.info('lifecycle scripts disabled for this run (--ignore-scripts)');
 
-    audit({ event: 'run', command, argv: effectiveArgv, cwd });
+    Logger.audit({ event: 'run', command, argv: effectiveArgv, cwd });
     const code = await delegate({ manager, argv: effectiveArgv, cwd });
 
     // Post-install sweep: the dry-run report carries no resolution URLs, so a
@@ -183,7 +183,7 @@ export async function runNpm({ command, argv, cwd }) {
     if (isInstall && code === 0) {
         const lockViolations = inspectLockfile(policy, cwd, compromised);
         if (lockViolations.length) {
-            warn('the install finished before these were found — no scripts ran, but review node_modules');
+            Logger.warn('the install finished before these were found — no scripts ran, but review node_modules');
             return abort({ ...context, phase: 'lockfile', violations: lockViolations });
         }
     }

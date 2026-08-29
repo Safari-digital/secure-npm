@@ -21,7 +21,7 @@ import {
     stripPhantomPnpmfileChecksum,
     withGlobalPnpmfileDisabled,
 } from '../src/pnpm-checksum.mjs';
-import { policyFile } from '../src/paths.mjs';
+import { POLICY_FILE } from '../src/paths.mjs';
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'secure-npm-checksum-'));
 after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -59,7 +59,7 @@ test('leaves a real local pnpmfile, or no checksum at all, alone', () => {
 // because that is the only part of secure-npm a directly-invoked pnpm loads.
 test('the pnpm hook wires the drop into afterAllResolved', async () => {
     // Suppresses the banner the hook prints when it believes it is on its own.
-    process.env.SECURE_NPM_POLICY = policyFile;
+    process.env.SECURE_NPM_POLICY = POLICY_FILE;
     const { hooks } = await import('../hooks/pnpmfile.mjs');
 
     assert.equal(typeof hooks.afterAllResolved, 'function');

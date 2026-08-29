@@ -3,7 +3,7 @@
  */
 
 import { spawn } from 'node:child_process';
-import { audit, reportBlocks } from './logger.mjs';
+import Logger from './logs/Logger.mjs';
 
 /**
  * Runs the genuine binary with the caller's stdio, so the wrapper stays
@@ -29,7 +29,7 @@ export function delegate({ manager, argv, cwd, env = {} }) {
         });
 
         child.on('error', error => {
-            process.stderr.write(`secure-npm: could not start ${manager.file}: ${error.message}\n`);
+            Logger.writeErr(`secure-npm: could not start ${manager.file}: ${error.message}\n`);
             resolve(1);
         });
 
@@ -46,7 +46,7 @@ export function abort({ violations, command, cwd, phase }) {
     }
 
     for (const [rule, entries] of grouped) {
-        reportBlocks({
+        Logger.reportBlocks({
             rule,
             title: `${entries.length} ${entries.length === 1 ? 'violation' : 'violations'} in ${command}`,
             entries: entries.map(entry => `${entry.subject} — ${entry.reason}`),
@@ -54,7 +54,7 @@ export function abort({ violations, command, cwd, phase }) {
         });
     }
 
-    audit({
+    Logger.audit({
         event: 'block',
         phase,
         command,

@@ -8,7 +8,7 @@
  */
 
 import { loadPolicy } from '../src/policy.mjs';
-import { maybePruneAuditLog } from '../src/logger.mjs';
+import Logger from '../src/logs/Logger.mjs';
 import { blockedManagerReason } from '../src/rules.mjs';
 import { runNpm } from '../src/run-npm.mjs';
 import { runPnpm } from '../src/run-pnpm.mjs';
@@ -29,7 +29,7 @@ const USAGE = `secure-npm — supply-chain guard rails for npm and pnpm
   secure-npm policy            print the effective policy
   secure-npm version           print the version and the install root
 
-npm, npx, pnpm and pnpx are shimmed onto PATH by install.mjs and route through
+npm, npx, pnpm and pnpx are shimmed onto PATH by installer.mjs and route through
 the guard rails on their own — there is nothing to prefix with this command.
 `;
 
@@ -40,7 +40,7 @@ async function main() {
     const cwd = process.cwd();
 
     if (HELP_FLAGS.has(invoked)) {
-        process.stdout.write(USAGE);
+        Logger.write(USAGE);
         return 0;
     }
 
@@ -50,27 +50,27 @@ async function main() {
         const [selfCommand, ...rest] = argv;
         if (SELF_COMMANDS.includes(selfCommand)) return runSelfCommand(selfCommand, rest);
 
-        if (!HELP_FLAGS.has(selfCommand)) process.stderr.write(`secure-npm: unknown command "${selfCommand}"\n\n`);
-        process.stdout.write(USAGE);
+        if (!HELP_FLAGS.has(selfCommand)) Logger.writeErr(`secure-npm: unknown command "${selfCommand}"\n\n`);
+        Logger.write(USAGE);
         return HELP_FLAGS.has(selfCommand) ? 0 : 2;
     }
 
     if (SELF_COMMANDS.includes(invoked)) return runSelfCommand(invoked, argv);
 
     const policy = loadPolicy();
-    maybePruneAuditLog(policy.logRetentionDays);
+    Logger.maybePruneAuditLog(policy.logRetentionDays);
 
     if (NPM_FAMILY.has(invoked)) return runNpm({ command: invoked, argv, cwd });
     if (PNPM_FAMILY.has(invoked)) return runPnpm({ command: invoked, argv, cwd });
     if (blockedManagerReason(policy, invoked)) return runBlocked({ command: invoked, argv, cwd });
 
-    process.stderr.write(`secure-npm: no route for "${invoked}"\n\n${USAGE}`);
+    Logger.writeErr(`secure-npm: no route for "${invoked}"\n\n${USAGE}`);
     return 2;
 }
 
 main()
     .then(code => process.exit(code ?? 0))
     .catch(error => {
-        process.stderr.write(`secure-npm: ${error?.stack ?? error}\n`);
+        Logger.writeErr(`secure-npm: ${error?.stack ?? error}\n`);
         process.exit(1);
     });

@@ -12,26 +12,25 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { spawnSync } from 'node:child_process';
 import { loadPolicy } from './policy.mjs';
-import { pruneAuditLog } from './logger.mjs';
+import Logger from './logs/Logger.mjs';
 import { runtimeStatus } from './runtime.mjs';
-import { columns } from './style.mjs';
 import { compromisedCacheStatus } from './compromised.mjs';
 import { runValidate } from './validate.mjs';
 import { findManager } from './which.mjs';
 import {
     IS_WINDOWS,
-    auditLogFile,
-    binDir,
-    configDir,
-    entryPoint,
-    localPolicyFile,
-    moduleRoot,
-    npmUserConfigFile,
-    pnpmConfigFile,
-    pnpmHookFile,
-    policyFile,
-    runtimeRoot,
-    shimMarkerFile,
+    APP_AUDIT_LOG_FILE,
+    APP_BIN_DIR,
+    APP_CONFIG_DIR,
+    APP_ENTRYPOINT,
+    LOCAL_POLICY_FILE,
+    MODULE_ROOT_PATH,
+    NPM_USR_CONFIG_FILE,
+    PNPM_CONFIG_FILE,
+    PNPM_HOOK_FILE,
+    POLICY_FILE,
+    APP_RUNTIME_DIR,
+    APP_SHIM_MARKER_FILE,
 } from './paths.mjs';
 
 const OK = '  ok    ';
@@ -39,11 +38,11 @@ const BAD = '  FAIL  ';
 const MEH = '  warn  ';
 
 function line(status, label, detail) {
-    process.stdout.write(`${status}${label.padEnd(34)}${detail ?? ''}\n`);
+    Logger.write(`${status}${label.padEnd(34)}${detail ?? ''}\n`);
 }
 
 function pathContainsBinDir() {
-    const target = path.resolve(binDir).toLowerCase();
+    const target = path.resolve(APP_BIN_DIR).toLowerCase();
     return (process.env.PATH ?? '')
         .split(path.delimiter)
         .some(entry => path.resolve(entry.replace(/^"|"$/g, '')).toLowerCase() === target);
@@ -68,7 +67,7 @@ function packageVersion(root) {
  * knows about it yet.
  */
 function reportVersion() {
-    const running = packageVersion(moduleRoot);
+    const running = packageVersion(MODULE_ROOT_PATH);
     const { stamp } = runtimeStatus();
 
     if (!stamp?.version) {
@@ -90,22 +89,22 @@ function reportRuntime(fail) {
     const { state, stamp } = runtimeStatus();
 
     if (state === 'missing') {
-        fail('runtime deployed', `missing: ${runtimeRoot} — run "node install.mjs" from the repository`);
+        fail('runtime deployed', `missing: ${APP_RUNTIME_DIR} — run "node installer.mjs" from the repository`);
         return;
     }
 
     if (state === 'unstamped') {
-        fail('runtime deployed', `${runtimeRoot} carries no stamp — re-run "node install.mjs"`);
+        fail('runtime deployed', `${APP_RUNTIME_DIR} carries no stamp — re-run "node installer.mjs"`);
         return;
     }
 
     if (state === 'stale') {
-        line(OK, 'runtime deployed', runtimeRoot);
-        fail('runtime up to date', `the source has changed — run "node ${path.join(stamp.source, 'install.mjs')}"`);
+        line(OK, 'runtime deployed', APP_RUNTIME_DIR);
+        fail('runtime up to date', `the source has changed — run "node ${path.join(stamp.source, 'installer.mjs')}"`);
         return;
     }
 
-    line(OK, 'runtime deployed', `${runtimeRoot} (${stamp.deployedAt})`);
+    line(OK, 'runtime deployed', `${APP_RUNTIME_DIR} (${stamp.deployedAt})`);
     state === 'source-gone'
         ? line(MEH, 'runtime source', `no longer at ${stamp.source} — updates cannot be checked`)
         : line(OK, 'runtime source', stamp.source);
@@ -147,14 +146,14 @@ function doctor() {
         line(BAD, label, detail);
     };
 
-    process.stdout.write(`\nsecure-npm doctor — running from ${moduleRoot}\n\n`);
+    Logger.write(`\nsecure-npm doctor — running from ${MODULE_ROOT_PATH}\n\n`);
 
     reportVersion();
     reportRuntime(fail);
 
-    fs.existsSync(policyFile) ? line(OK, 'policy file', policyFile) : fail('policy file', `missing: ${policyFile}`);
-    fs.existsSync(localPolicyFile)
-        ? line(OK, 'local policy overlay', localPolicyFile)
+    fs.existsSync(POLICY_FILE) ? line(OK, 'policy file', POLICY_FILE) : fail('policy file', `missing: ${POLICY_FILE}`);
+    fs.existsSync(LOCAL_POLICY_FILE)
+        ? line(OK, 'local policy overlay', LOCAL_POLICY_FILE)
         : line(OK, 'local policy overlay', 'none — "secure-npm edit-policy" creates one');
 
     line(
@@ -177,36 +176,35 @@ function doctor() {
             : policy.allowedGitSources.map(({ source }) => source).join(', ') || 'none'
     );
 
-    fs.existsSync(shimMarkerFile)
-        ? line(OK, 'shim directory', binDir)
-        : fail('shim directory', `not installed: ${binDir} — run "node install.mjs"`);
+    fs.existsSync(APP_SHIM_MARKER_FILE)
+        ? line(OK, 'shim directory', APP_BIN_DIR)
+        : fail('shim directory', `not installed: ${APP_BIN_DIR} — run "node installer.mjs"`);
 
     // Shims written before the runtime was deployed still start the repository
     // copy, which keeps working right up until the clone moves.
-    const shimFile = path.join(binDir, IS_WINDOWS ? 'npm.cmd' : 'npm');
+    const shimFile = path.join(APP_BIN_DIR, IS_WINDOWS ? 'npm.cmd' : 'npm');
     if (fs.existsSync(shimFile)) {
-        fs.readFileSync(shimFile, 'utf8').includes(entryPoint)
-            ? line(OK, 'shims start the runtime', entryPoint)
-            : fail('shims start the runtime', `${shimFile} points elsewhere — re-run "node install.mjs"`);
+        fs.readFileSync(shimFile, 'utf8').includes(APP_ENTRYPOINT)
+            ? line(OK, 'shims start the runtime', APP_ENTRYPOINT)
+            : fail('shims start the runtime', `${shimFile} points elsewhere — re-run "node installer.mjs"`);
     }
 
     pathContainsBinDir()
         ? line(OK, 'shim directory on PATH', 'yes')
-        : fail('shim directory on PATH', `add ${binDir} to PATH, ahead of Node's own bin directory`);
+        : fail('shim directory on PATH', `add ${APP_BIN_DIR} to PATH, ahead of Node's own bin directory`);
 
     for (const name of ['npm', 'pnpm']) {
         const found = findManager(name);
         found ? line(OK, `real ${name}`, found.file) : line(MEH, `real ${name}`, 'not found on PATH');
     }
 
-    const pnpmConfig = pnpmConfigFile();
-    if (!fs.existsSync(pnpmConfig)) {
-        fail('pnpm global config', `missing: ${pnpmConfig}`);
+    if (!fs.existsSync(PNPM_CONFIG_FILE)) {
+        fail('pnpm global config', `missing: ${PNPM_CONFIG_FILE}`);
     } else {
-        const contents = fs.readFileSync(pnpmConfig, 'utf8');
-        contents.includes(pnpmHookFile)
-            ? line(OK, 'pnpm hook wired', pnpmHookFile)
-            : fail('pnpm hook wired', `globalPnpmfile does not point at ${pnpmHookFile}`);
+        const contents = fs.readFileSync(PNPM_CONFIG_FILE, 'utf8');
+        contents.includes(PNPM_HOOK_FILE)
+            ? line(OK, 'pnpm hook wired', PNPM_HOOK_FILE)
+            : fail('pnpm hook wired', `globalPnpmfile does not point at ${PNPM_HOOK_FILE}`);
         /^\s*minimumReleaseAge\s*:/m.test(contents)
             ? line(OK, 'pnpm release-age policy', 'set')
             : fail('pnpm release-age policy', 'minimumReleaseAge is not set');
@@ -221,16 +219,15 @@ function doctor() {
         const shouldBlockNatively = !policy.allowExoticSources && policy.allowedGitSources.length === 0;
         blocksNatively === shouldBlockNatively
             ? line(OK, 'pnpm exotic sub-dependencies', blocksNatively ? 'blocked natively' : 'delegated to the hook')
-            : fail('pnpm exotic sub-dependencies', 'no longer matches the policy — run "node install.mjs"');
+            : fail('pnpm exotic sub-dependencies', 'no longer matches the policy — run "node installer.mjs"');
     }
 
-    const npmrc = npmUserConfigFile();
-    if (!fs.existsSync(npmrc)) {
-        fail('npm user config', `missing: ${npmrc}`);
+    if (!fs.existsSync(NPM_USR_CONFIG_FILE)) {
+        fail('npm user config', `missing: ${NPM_USR_CONFIG_FILE}`);
     } else {
-        /^\s*ignore-scripts\s*=\s*true/m.test(fs.readFileSync(npmrc, 'utf8'))
-            ? line(OK, 'npm ignore-scripts', npmrc)
-            : fail('npm ignore-scripts', `not set in ${npmrc}`);
+        /^\s*ignore-scripts\s*=\s*true/m.test(fs.readFileSync(NPM_USR_CONFIG_FILE, 'utf8'))
+            ? line(OK, 'npm ignore-scripts', NPM_USR_CONFIG_FILE)
+            : fail('npm ignore-scripts', `not set in ${NPM_USR_CONFIG_FILE}`);
     }
 
     // A blocked manager already installed keeps working if it is reachable by
@@ -240,36 +237,36 @@ function doctor() {
         if (found) line(MEH, `blocked manager present`, `${command} → ${found.file}`);
     }
 
-    line(fs.existsSync(auditLogFile) ? OK : MEH, 'audit log', auditLogFile);
+    line(fs.existsSync(APP_AUDIT_LOG_FILE) ? OK : MEH, 'audit log', APP_AUDIT_LOG_FILE);
 
-    process.stdout.write(`\n${failures === 0 ? 'All guard rails are in place.' : `${failures} check(s) failed.`}\n\n`);
+    Logger.write(`\n${failures === 0 ? 'All guard rails are in place.' : `${failures} check(s) failed.`}\n\n`);
     return failures === 0 ? 0 : 1;
 }
 
 function showLog(argv) {
     const count = Number.parseInt(argv[0] ?? '20', 10);
-    if (!fs.existsSync(auditLogFile)) {
-        process.stdout.write(`no audit log yet: ${auditLogFile}\n`);
+    if (!fs.existsSync(APP_AUDIT_LOG_FILE)) {
+        Logger.write(`no audit log yet: ${APP_AUDIT_LOG_FILE}\n`);
         return 0;
     }
 
-    const lines = fs.readFileSync(auditLogFile, 'utf8').split('\n').filter(Boolean).slice(-count);
+    const lines = fs.readFileSync(APP_AUDIT_LOG_FILE, 'utf8').split('\n').filter(Boolean).slice(-count);
     for (const raw of lines) {
         try {
             const entry = JSON.parse(raw);
             const argv = Array.isArray(entry.argv) && entry.argv.length ? ` ${entry.argv.join(' ')}` : '';
             const subject = entry.command ?? `${entry.phase ?? ''}`;
-            process.stdout.write(
+            Logger.write(
                 `${entry.ts}  ${String(entry.event).toUpperCase().padEnd(5)}  ${subject}${argv}\n`
             );
 
             const violations = entry.violations ?? (entry.rule ? [entry] : []);
             for (const violation of violations) {
                 const where = violation.subject ? `${violation.subject} — ` : '';
-                process.stdout.write(`    ${violation.rule}: ${where}${violation.reason}\n`);
+                Logger.write(`    ${violation.rule}: ${where}${violation.reason}\n`);
             }
         } catch {
-            process.stdout.write(`${raw}\n`);
+            Logger.write(`${raw}\n`);
         }
     }
     return 0;
@@ -277,7 +274,7 @@ function showLog(argv) {
 
 function showPolicy() {
     const policy = loadPolicy();
-    process.stdout.write(
+    Logger.write(
         `${JSON.stringify(
             {
                 sources: policy.sources,
@@ -302,18 +299,18 @@ function showPolicy() {
 
 function showVersion() {
     const require = createRequire(import.meta.url);
-    const { name, version } = require(path.join(moduleRoot, 'package.json'));
+    const { name, version } = require(path.join(MODULE_ROOT_PATH, 'package.json'));
     const { stamp } = runtimeStatus();
 
     // Two versions, because they are two different things: what this command is
     // running from, and what the shims and the pnpm hook load on every install.
     const rows = [
-        { label: 'root', value: moduleRoot },
-        { label: 'entry', value: entryPoint },
+        { label: 'root', value: MODULE_ROOT_PATH },
+        { label: 'entry', value: APP_ENTRYPOINT },
         { label: 'installed', value: stamp?.version ? `${stamp.version} (${stamp.deployedAt})` : 'nothing deployed' },
     ];
 
-    process.stdout.write(`${name} ${version}\n${columns(rows).join('\n')}\n`);
+    Logger.write(`${name} ${version}\n${Logger.styles.columns(rows).join('\n')}\n`);
     return 0;
 }
 
@@ -330,7 +327,7 @@ const OVERLAY_TEMPLATE = {
         'Machine-local policy overlay, shallow-merged on top of the shared policy.json.',
         'A key set here REPLACES the shared value, it does not extend it.',
         'Keys starting with $ are ignored — rename an example to switch it on.',
-        'Re-run "node install.mjs" from the repository afterwards: pnpm reads its own',
+        'Re-run "node installer.mjs" from the repository afterwards: pnpm reads its own',
         'copy of these settings, generated at install time.',
     ],
     $examples: {
@@ -365,38 +362,38 @@ function openEditor(file) {
 }
 
 function editPolicy() {
-    fs.mkdirSync(configDir, { recursive: true });
+    fs.mkdirSync(APP_CONFIG_DIR, { recursive: true });
 
-    const created = !fs.existsSync(localPolicyFile);
-    if (created) fs.writeFileSync(localPolicyFile, `${JSON.stringify(OVERLAY_TEMPLATE, null, 4)}\n`);
+    const created = !fs.existsSync(LOCAL_POLICY_FILE);
+    if (created) fs.writeFileSync(LOCAL_POLICY_FILE, `${JSON.stringify(OVERLAY_TEMPLATE, null, 4)}\n`);
 
-    process.stdout.write(`${created ? 'created' : 'editing'} ${localPolicyFile}\n`);
+    Logger.write(`${created ? 'created' : 'editing'} ${LOCAL_POLICY_FILE}\n`);
 
-    const { launched, waited, command } = openEditor(localPolicyFile);
+    const { launched, waited, command } = openEditor(LOCAL_POLICY_FILE);
     if (!launched) {
-        process.stdout.write(`could not start an editor (${command}) — open the file above yourself\n`);
+        Logger.write(`could not start an editor (${command}) — open the file above yourself\n`);
         return 0;
     }
 
     if (!waited) {
-        process.stdout.write('run "secure-npm doctor" once you are done to check the result\n');
+        Logger.write('run "secure-npm doctor" once you are done to check the result\n');
         return 0;
     }
 
     // An overlay that does not parse takes every npm and pnpm command down with
     // it, so it is worth catching here rather than on the next install.
     try {
-        JSON.parse(fs.readFileSync(localPolicyFile, 'utf8'));
+        JSON.parse(fs.readFileSync(LOCAL_POLICY_FILE, 'utf8'));
     } catch (error) {
-        process.stderr.write(`\nthis file is not valid JSON — every npm and pnpm command will fail until it is\n`);
-        process.stderr.write(`  ${error.message}\n`);
+        Logger.writeErr(`\nthis file is not valid JSON — every npm and pnpm command will fail until it is\n`);
+        Logger.writeErr(`  ${error.message}\n`);
         return 1;
     }
 
     const { stamp } = runtimeStatus();
-    const installer = stamp?.source ? path.join(stamp.source, 'install.mjs') : 'install.mjs';
-    process.stdout.write(`\npnpm keeps its own copy of the release-age, trust and exotic-source settings.\n`);
-    process.stdout.write(`If you changed any of those, re-run "node ${installer}", then "secure-npm doctor".\n`);
+    const installer = stamp?.source ? path.join(stamp.source, 'installer.mjs') : 'installer.mjs';
+    Logger.write(`\npnpm keeps its own copy of the release-age, trust and exotic-source settings.\n`);
+    Logger.write(`If you changed any of those, re-run "node ${installer}", then "secure-npm doctor".\n`);
 
     return 0;
 }
@@ -405,7 +402,7 @@ export function runSelfCommand(command, argv) {
     switch (command) {
         case 'doctor': {
             const code = doctor();
-            pruneAuditLog(loadPolicy().logRetentionDays);
+            Logger.pruneAuditLog(loadPolicy().logRetentionDays);
             return code;
         }
         case 'edit-policy':
@@ -419,7 +416,7 @@ export function runSelfCommand(command, argv) {
         case 'version':
             return showVersion();
         default:
-            process.stderr.write(`secure-npm: unknown command "${command}"\n`);
+            Logger.writeErr(`secure-npm: unknown command "${command}"\n`);
             return 2;
     }
 }

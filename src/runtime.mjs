@@ -16,11 +16,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
-import { runtimeRoot, runtimeStampFile } from './paths.mjs';
+import { APP_RUNTIME_DIR, APP_RUNTIME_STAMP_FILE } from './paths.mjs';
 
 /**
- * What a working runtime needs. `install.mjs` and `uninstall.mjs` stay behind
- * on purpose — they operate on the source tree and are run from it.
+ * What a working runtime needs. `installer.mjs` stays behind on purpose — it
+ * operates on the source tree and is run from it.
  */
 export const DEPLOYED = ['bin', 'src', 'hooks', 'policy.json', 'package.json'];
 
@@ -65,42 +65,10 @@ export function fingerprint(root) {
 
 export function readStamp() {
     try {
-        return JSON.parse(fs.readFileSync(runtimeStampFile, 'utf8'));
+        return JSON.parse(fs.readFileSync(APP_RUNTIME_STAMP_FILE, 'utf8'));
     } catch {
         return null;
     }
-}
-
-/**
- * Replaces the deployed runtime with a copy of `sourceRoot`.
- *
- * Removed first rather than copied over: a file dropped from a later version
- * would otherwise linger for good, and a stale `src/` module is indistinguishable
- * from a current one once it is sitting in the tree.
- */
-export function deployRuntime(sourceRoot) {
-    for (const entry of DEPLOYED) {
-        const from = path.join(sourceRoot, entry);
-        if (!fs.existsSync(from)) throw new Error(`cannot deploy the runtime: ${from} is missing`);
-    }
-
-    fs.rmSync(runtimeRoot, { recursive: true, force: true });
-    fs.mkdirSync(runtimeRoot, { recursive: true });
-
-    for (const entry of DEPLOYED) {
-        fs.cpSync(path.join(sourceRoot, entry), path.join(runtimeRoot, entry), { recursive: true });
-    }
-
-    const { version } = JSON.parse(fs.readFileSync(path.join(sourceRoot, 'package.json'), 'utf8'));
-    const stamp = {
-        source: sourceRoot,
-        version,
-        deployedAt: new Date().toISOString(),
-        fingerprint: fingerprint(runtimeRoot),
-    };
-
-    fs.writeFileSync(runtimeStampFile, `${JSON.stringify(stamp, null, 4)}\n`);
-    return stamp;
 }
 
 /**
@@ -114,13 +82,13 @@ export function deployRuntime(sourceRoot) {
  * @returns {{ state: 'missing' | 'unstamped' | 'source-gone' | 'stale' | 'current', stamp?: object }}
  */
 export function runtimeStatus() {
-    if (!fs.existsSync(runtimeStampFile)) {
-        return { state: fs.existsSync(runtimeRoot) ? 'unstamped' : 'missing' };
+    if (!fs.existsSync(APP_RUNTIME_STAMP_FILE)) {
+        return { state: fs.existsSync(APP_RUNTIME_DIR) ? 'unstamped' : 'missing' };
     }
 
     const stamp = readStamp();
     if (!stamp?.source) return { state: 'unstamped' };
     if (!fs.existsSync(path.join(stamp.source, 'package.json'))) return { state: 'source-gone', stamp };
 
-    return { state: fingerprint(stamp.source) === fingerprint(runtimeRoot) ? 'current' : 'stale', stamp };
+    return { state: fingerprint(stamp.source) === fingerprint(APP_RUNTIME_DIR) ? 'current' : 'stale', stamp };
 }

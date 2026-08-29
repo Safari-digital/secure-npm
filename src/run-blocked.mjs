@@ -9,7 +9,7 @@
  * package block list that both the npm wrapper and the pnpm hook enforce.
  */
 
-import { audit, reportBlock } from './logger.mjs';
+import Logger from './logs/Logger.mjs';
 import { loadPolicy } from './policy.mjs';
 import { blockedManagerReason } from './rules.mjs';
 
@@ -17,14 +17,14 @@ export async function runBlocked({ command, argv, cwd }) {
     const policy = loadPolicy();
     const reason = blockedManagerReason(policy, command) ?? 'this package manager is not approved on this machine';
 
-    reportBlock({
+    Logger.reportBlock({
         rule: 'blocked-manager',
         subject: `${command} ${argv.join(' ')}`.trim(),
         reason,
         hint: 'use npm or pnpm; edit "blockedManagers" in policy.json to change this',
     });
 
-    audit({ event: 'block', phase: 'invocation', rule: 'blocked-manager', command, argv, cwd, reason });
+    Logger.audit({ event: 'block', phase: 'invocation', rule: 'blocked-manager', command, argv, cwd, reason });
 
     return 127;
 }

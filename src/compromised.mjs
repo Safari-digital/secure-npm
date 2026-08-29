@@ -24,8 +24,8 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { compromisedCacheFile } from './paths.mjs';
-import { warn } from './logger.mjs';
+import { COMPROMISED_CACHE_FILE } from './paths.mjs';
+import Logger from './logs/Logger.mjs';
 
 const REQUEST_TIMEOUT_MS = 30_000;
 const USER_AGENT = 'secure-npm (supply-chain guard)';
@@ -35,7 +35,7 @@ let pending = null;
 
 function readCache(source) {
     try {
-        const cached = JSON.parse(fs.readFileSync(compromisedCacheFile, 'utf8'));
+        const cached = JSON.parse(fs.readFileSync(COMPROMISED_CACHE_FILE, 'utf8'));
         // A cache written from another source answers a different question.
         if (cached.source !== source || !cached.index) return null;
         return { index: cached.index, fetchedAt: cached.fetchedAt, count: cached.count };
@@ -50,10 +50,10 @@ function readCache(source) {
  */
 function writeCache(source, index, count) {
     try {
-        fs.mkdirSync(path.dirname(compromisedCacheFile), { recursive: true });
-        const temporary = `${compromisedCacheFile}.${process.pid}.tmp`;
+        fs.mkdirSync(path.dirname(COMPROMISED_CACHE_FILE), { recursive: true });
+        const temporary = `${COMPROMISED_CACHE_FILE}.${process.pid}.tmp`;
         fs.writeFileSync(temporary, JSON.stringify({ source, fetchedAt: Date.now(), count, index }), 'utf8');
-        fs.renameSync(temporary, compromisedCacheFile);
+        fs.renameSync(temporary, COMPROMISED_CACHE_FILE);
     } catch {
         // A cold cache only costs one more request.
     }
@@ -97,7 +97,7 @@ async function resolveList(policy) {
     } catch (error) {
         if (cached && age < minutes(policy.compromisedPackagesMaxStaleMinutes)) {
             const hours = Math.round(age / 3_600_000);
-            warn(
+            Logger.warn(
                 `the malicious-package list could not be refreshed (${error.message}) — using the copy fetched ${hours}h ago`
             );
             return {

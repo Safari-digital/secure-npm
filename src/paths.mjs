@@ -1,112 +1,56 @@
-/**
- * Every filesystem location the tool uses, resolved once, for Windows and POSIX.
- *
- * Three roots, deliberately distinct:
- *
- *   moduleRoot   the copy of the code that is currently running — the repository
- *                when a command is started from a clone, the deployed runtime
- *                when it is started through a shim or by pnpm,
- *   runtimeRoot  the copy the installer deploys, and the only one the shims,
- *                pnpm's global config and the hook ever point at,
- *   configDir    the machine-local policy overlay, which is not versioned and so
- *                has no business living inside the repository.
- *
- * The repository is therefore a source tree and nothing else: nothing outside it
- * refers back to it, and moving or deleting a clone cannot disarm the machine.
- */
-
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const IS_WINDOWS = process.platform === 'win32';
-const IS_MACOS = process.platform === 'darwin';
+export const APP_NAME       = 'secure-npm';
 
-const localAppData = () => process.env.LOCALAPPDATA ?? path.join(os.homedir(), 'AppData', 'Local');
+export const IS_WINDOWS     = process.platform === 'win32';
+export const IS_MACOS       = process.platform === 'darwin';
 
-/** Root of the tree this file belongs to — this file lives in <root>/src. */
-export const moduleRoot = path.resolve(fileURLToPath(import.meta.url), '..', '..');
+const OS_CONFIG_PATH        = process.env.XDG_CONFIG_HOME   ?? path.join(os.homedir(), '.config');
+const OS_DATA_HOME_PATH     = process.env.XDG_DATA_HOME     ?? path.join(os.homedir(), '.local', 'share');
+const OS_STATE_PATH         = process.env.XDG_STATE_HOME    ?? path.join(os.homedir(), '.local', 'state');
+const OS_CACHE_PATH         = process.env.XDG_CACHE_HOME    ?? path.join(os.homedir(), '.cache');
+const WINDOWS_APPDATA_PATH  = process.env.LOCALAPPDATA      ?? path.join(os.homedir(), 'AppData', 'Local');
+const WINDOWS_APP_PATH      = path.join(WINDOWS_APPDATA_PATH, APP_NAME);
 
-/** Deployed program: the runtime the installer copies, plus the shims. */
-const dataHome = IS_WINDOWS
-    ? path.join(localAppData(), 'secure-npm')
-    : path.join(process.env.XDG_DATA_HOME ?? path.join(os.homedir(), '.local', 'share'), 'secure-npm');
+export const MODULE_ROOT_PATH           = path.resolve(fileURLToPath(import.meta.url), '..', '..');
+export const APP_PATH                   = IS_WINDOWS ? WINDOWS_APP_PATH : path.join(OS_DATA_HOME_PATH, APP_NAME);
+export const APP_RUNTIME_DIR            = path.join(APP_PATH, 'runtime');
+export const APP_RUNTIME_STAMP_FILE     = path.join(APP_RUNTIME_DIR, `.${APP_NAME}-runtime`);
+export const APP_BIN_DIR                = path.join(APP_PATH, 'bin');
+export const APP_SHIM_MARKER_FILE       = path.join(APP_BIN_DIR, `.${APP_NAME}-shims`);
+export const APP_CONFIG_DIR             = IS_WINDOWS ? WINDOWS_APP_PATH : path.join(OS_CONFIG_PATH, APP_NAME);
+export const APP_STATE_PATH             = IS_WINDOWS ? WINDOWS_APP_PATH : path.join(OS_STATE_PATH, APP_NAME);
 
-/**
- * The deployed copy of the runtime. Replaced wholesale on every install, so
- * nothing here is ever worth editing by hand — `doctor` reports it as stale the
- * moment it stops matching the source it came from.
- */
-export const runtimeRoot = path.join(dataHome, 'runtime');
+export const LOCAL_POLICY_FILE          = path.join(APP_CONFIG_DIR,     'policy.local.json');
+export const POLICY_FILE                = path.join(MODULE_ROOT_PATH,   'policy.json');
+export const RUNTIME_POLICY_FILE        = path.join(APP_RUNTIME_DIR,    'policy.json');
+export const APP_LOG_DIR                = path.join(APP_STATE_PATH,     'logs');
+export const APP_AUDIT_LOG_FILE         = path.join(APP_LOG_DIR,        'audit.log');
 
-/** Records what was deployed and from where. Written by `deployRuntime`. */
-export const runtimeStampFile = path.join(runtimeRoot, '.secure-npm-runtime');
+export const APP_CACHE_DIR              = IS_WINDOWS
+                                            ? path.join(WINDOWS_APP_PATH, 'cache')
+                                            : path.join(OS_CACHE_PATH, APP_NAME);
 
-/**
- * Where shims live. Prepended to PATH so `npm` and `pnpm` resolve here first,
- * and so blocked managers resolve to a refusal instead of a real binary.
- */
-export const binDir = path.join(dataHome, 'bin');
+export const PACKUMENT_CACHE_DIR        = path.join(APP_CACHE_DIR,      'packuments');
+export const COMPROMISED_CACHE_FILE     = path.join(APP_CACHE_DIR,      'compromised-packages.json');
 
-/**
- * Marker dropped next to the shims. `which.mjs` skips any PATH entry holding
- * one, which is what stops a shim from resolving to itself.
- */
-export const shimMarkerFile = path.join(binDir, '.secure-npm-shims');
+export const PNPM_HOOK_FILE             = path.join(APP_RUNTIME_DIR, 'hooks', 'pnpmfile.mjs');
+export const APP_ENTRYPOINT             = path.join(APP_RUNTIME_DIR, 'bin', `${APP_NAME}.mjs`);
 
-/** Hand-edited configuration, never touched by the installer. */
-export const configDir = IS_WINDOWS
-    ? path.join(localAppData(), 'secure-npm')
-    : path.join(process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), '.config'), 'secure-npm');
+export const PNPM_CONFIG_DIR = (() => {
+    if (process.env.XDG_CONFIG_HOME)
+        return path.join(process.env.XDG_CONFIG_HOME, 'pnpm');
+    if (IS_MACOS)
+        return path.join(os.homedir(), 'Library', 'Preferences', 'pnpm');
+    if (!IS_WINDOWS)
+        return path.join(os.homedir(), '.config', 'pnpm');
+    if (process.env.LOCALAPPDATA)
+        return path.join(process.env.LOCALAPPDATA, 'pnpm', 'config');
 
-export const localPolicyFile = path.join(configDir, 'policy.local.json');
-
-/** Where the overlay used to live. The installer moves it out and says so. */
-export const legacyLocalPolicyFile = path.join(moduleRoot, 'policy.local.json');
-
-/**
- * The shared ruleset, read from whichever copy is running: the repository for
- * the installer, the deployed runtime for everything else.
- */
-export const policyFile = path.join(moduleRoot, 'policy.json');
-
-/** The same file inside the deployed runtime — what the guard rails actually read. */
-export const runtimePolicyFile = path.join(runtimeRoot, 'policy.json');
-
-export const pnpmHookFile = path.join(runtimeRoot, 'hooks', 'pnpmfile.mjs');
-export const entryPoint = path.join(runtimeRoot, 'bin', 'secure-npm.mjs');
-
-const stateHome = IS_WINDOWS
-    ? path.join(localAppData(), 'secure-npm')
-    : path.join(process.env.XDG_STATE_HOME ?? path.join(os.homedir(), '.local', 'state'), 'secure-npm');
-
-export const logDir = path.join(stateHome, 'logs');
-export const auditLogFile = path.join(logDir, 'audit.log');
-
-export const cacheDir = IS_WINDOWS
-    ? path.join(localAppData(), 'secure-npm', 'cache')
-    : path.join(process.env.XDG_CACHE_HOME ?? path.join(os.homedir(), '.cache'), 'secure-npm');
-
-export const packumentCacheDir = path.join(cacheDir, 'packuments');
-
-/** The malicious-package list, kept whole rather than per package. */
-export const compromisedCacheFile = path.join(cacheDir, 'compromised-packages.json');
-
-/**
- * pnpm's own config directory. Mirrors `getConfigDir` in pnpm's source — if
- * pnpm ever moves it, `secure-npm --self doctor` reports the mismatch.
- */
-export function pnpmConfigDir() {
-    if (process.env.XDG_CONFIG_HOME) return path.join(process.env.XDG_CONFIG_HOME, 'pnpm');
-    if (IS_MACOS) return path.join(os.homedir(), 'Library', 'Preferences', 'pnpm');
-    if (!IS_WINDOWS) return path.join(os.homedir(), '.config', 'pnpm');
-    if (process.env.LOCALAPPDATA) return path.join(process.env.LOCALAPPDATA, 'pnpm', 'config');
     return path.join(os.homedir(), '.config', 'pnpm');
-}
+})()
 
-export const pnpmConfigFile = () => path.join(pnpmConfigDir(), 'config.yaml');
-
-/** npm reads this on every invocation, whatever the working directory. */
-export const npmUserConfigFile = () => path.join(os.homedir(), '.npmrc');
-
-export { IS_WINDOWS };
+export const PNPM_CONFIG_FILE       = path.join(PNPM_CONFIG_DIR, 'config.yaml');
+export const NPM_USR_CONFIG_FILE    = path.join(os.homedir(), '.npmrc');
