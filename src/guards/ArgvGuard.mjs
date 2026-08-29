@@ -190,6 +190,19 @@ export default class ArgvGuard {
                 continue;
             }
 
+            // pnpm >= 11 never resolves a known package manager: `pnpm add yarn`
+            // writes "packageManager" into package.json and the hook sees nothing.
+            const manager = family === 'pnpm' && target.name && Rules.blockedManagerReason(policy, target.name);
+            if (manager) {
+                violations.push({
+                    rule: 'blocked-manager',
+                    subject: target.raw,
+                    reason: manager,
+                    hint: `pnpm would record "${target.name}" as the project's "packageManager" instead of installing it - edit "blockedManagers" in policy.json if it should be allowed`,
+                });
+                continue;
+            }
+
             // Name-based rules only: a bare token may be the value of `--filter`
             // rather than something about to be installed.
             const reason = target.name && Rules.blockedPackageReason(policy, target.name);

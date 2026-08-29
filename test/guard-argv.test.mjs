@@ -85,3 +85,29 @@ test('warns rather than throws when the project has no manifest at all', () => {
 
     assert.match(ArgvGuard.unknownCommandReason('pnpm', ['frobnicate'], empty).reason, /frobnicate/);
 });
+
+// pnpm >= 11 turns `pnpm add yarn` into a "packageManager" field in
+// package.json, resolving nothing - so the resolution hook never fires and
+// only the wrapper can refuse it.
+const POLICY = {
+    registries: { default: 'https://registry.npmjs.org/' },
+    blockedPackages: [],
+    blockedManagers: new Map([['yarn', 'yarn package manager']]),
+    allowExoticSources: false,
+    allowedGitSources: [],
+};
+
+test('refuses adding a blocked package manager, pinned or not', () => {
+    for (const argv of [['add', 'yarn'], ['add', 'yarn@4.18.0'], ['add', '-D', 'yarn']]) {
+        const violations = ArgvGuard.inspect(POLICY, 'pnpm', argv);
+
+        assert.equal(violations.length, 1, argv.join(' '));
+        assert.equal(violations[0].rule, 'blocked-manager');
+        assert.match(violations[0].hint, /packageManager/);
+    }
+});
+
+test('leaves ordinary pnpm targets and the npm family alone', () => {
+    assert.deepEqual(ArgvGuard.inspect(POLICY, 'pnpm', ['add', 'vite']), []);
+    assert.deepEqual(ArgvGuard.inspect(POLICY, 'npm', ['install', 'yarn']), []);
+});
