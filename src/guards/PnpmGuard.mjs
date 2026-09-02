@@ -56,18 +56,18 @@ export default class PnpmGuard {
         for (const [name, entries] of Object.entries(index)) {
             count += entries.length;
 
-            const blocked = Rules.blockedPackageReason(policy, name);
-            if (blocked) {
-                violations.push({
-                    rule: 'blocked-package',
-                    subject: `${name} - ${LockFiles.PNPM_LOCK_FILE}`,
-                    reason: blocked,
-                    hint: 'the lockfile already pins it; remove it there as well as from package.json',
-                });
-                continue;
-            }
-
             for (const { version, resolved } of entries) {
+                const blocked = Rules.dependencyBlockReason(policy, name, version);
+                if (blocked) {
+                    violations.push({
+                        rule: 'blocked-package',
+                        subject: `${name}@${version} - ${LockFiles.PNPM_LOCK_FILE}`,
+                        reason: blocked,
+                        hint: `the lockfile already pins it; remove it there as well as from package.json, or ${Rules.blockedPackageHint(name, version)}`,
+                    });
+                    continue;
+                }
+
                 const malicious = Compromised.reason(compromised, name, version, resolved);
                 if (malicious) {
                     violations.push({

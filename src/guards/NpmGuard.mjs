@@ -97,9 +97,14 @@ export default class NpmGuard {
                 continue;
             }
 
-            const reason = Rules.blockedPackageReason(policy, name);
+            const reason = Rules.dependencyBlockReason(policy, name, version);
             if (reason) {
-                violations.push({ rule: 'blocked-package', subject: `${name}@${version}`, reason });
+                violations.push({
+                    rule: 'blocked-package',
+                    subject: `${name}@${version}`,
+                    reason,
+                    hint: Rules.blockedPackageHint(name, version),
+                });
                 continue;
             }
 
@@ -240,9 +245,14 @@ export default class NpmGuard {
                 continue;
             }
 
-            const reason = Rules.blockedPackageReason(policy, name);
+            const reason = Rules.dependencyBlockReason(policy, name, entry?.version);
             if (reason) {
-                violations.push({ rule: 'blocked-package', subject: `${name} - ${key}`, reason });
+                violations.push({
+                    rule: 'blocked-package',
+                    subject: `${name} - ${key}`,
+                    reason,
+                    hint: Rules.blockedPackageHint(name, entry?.version ?? null),
+                });
                 continue;
             }
 

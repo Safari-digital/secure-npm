@@ -1,17 +1,3 @@
-/**
- * pnpm resolution hook - wired up by `globalPnpmfile` in pnpm's global config.
- *
- * pnpm calls `readPackage` on every manifest it resolves, before anything is
- * downloaded, so throwing here aborts the install. It runs inside pnpm's own
- * process, whether pnpm was started through the shim or called directly, which
- * makes it the backstop for both. The list is loaded on the first package
- * rather than at import time: pnpm loads this file for commands that resolve
- * nothing at all.
- *
- * `afterAllResolved` enforces no policy - it undoes a side effect of this very
- * file. See guards/PnpmChecksum.mjs.
- */
-
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import Logger from '../src/logs/Logger.mjs';
@@ -23,8 +9,6 @@ import { LOCAL_POLICY_FILE, POLICY_FILE } from '../src/paths.mjs';
 
 const policy = Policy.load();
 
-// The wrapper sets this and prints its own banner; absent, pnpm was started
-// outside the shim and this is the only chance to say what is enforced.
 if (!process.env.SECURE_NPM_POLICY) {
     Logger.banner({
         command: 'pnpm (called directly)',
@@ -58,8 +42,6 @@ async function readPackage(pkg) {
     const unavailable = Compromised.listViolation(list);
     if (unavailable) refuse({ ...unavailable, origin });
 
-    // The only place a sub-dependency's exact version is ever seen: the
-    // wrapper's lockfile pass reads what is pinned, this reads what is about to be.
     const selfMalicious = Compromised.reason(list.index, pkg.name, pkg.version);
     if (selfMalicious) {
         refuse({
@@ -71,22 +53,22 @@ async function readPackage(pkg) {
         });
     }
 
-    // Catches the package itself whatever field pulled it in, including
-    // devDependencies of the local project, which is what `pnpm add -D` writes.
-    const selfReason = pkg.name && Rules.blockedPackageReason(policy, pkg.name);
+    const selfReason = pkg.name && Rules.dependencyBlockReason(policy, pkg.name, pkg.version);
     if (selfReason) {
-        refuse({ rule: 'blocked-package', subject: pkg.name, reason: selfReason, origin });
+        refuse({
+            rule: 'blocked-package',
+            subject: origin,
+            reason: selfReason,
+            hint: Rules.blockedPackageHint(pkg.name, pkg.version ?? null),
+            origin,
+        });
     }
 
-    // Only the fields pnpm installs for a third-party manifest - its
-    // devDependencies are never fetched, and rejecting them would break installs.
     for (const field of Rules.INSTALLED_FIELDS) {
         for (const [key, specifier] of Object.entries(pkg[field] ?? {})) {
             const name = Rules.resolveName(key, specifier);
             const alias = name === key ? '' : ` (aliased as "${key}")`;
 
-            // By name only - a dependency declares a range; the exact version
-            // is checked above once pnpm resolves it.
             const malicious = Compromised.reason(list.index, name);
             if (malicious) {
                 refuse({
@@ -98,18 +80,17 @@ async function readPackage(pkg) {
                 });
             }
 
-            const reason = Rules.blockedPackageReason(policy, name);
+            const reason = Rules.dependencyBlockReason(policy, name);
             if (reason) {
                 refuse({
                     rule: 'blocked-package',
                     subject: `${name}${alias}, required by ${origin} ▸ ${field}`,
                     reason,
+                    hint: Rules.blockedPackageHint(name),
                     origin,
                 });
             }
 
-            // With the whitelist in use this is the only enforcement point left
-            // for sub-dependencies: pnpm's blockExoticSubdeps is a boolean.
             if (Rules.isExoticSpecifier(specifier)) {
                 const { allowed, identity } = Rules.exoticSourceVerdict(policy, specifier);
                 if (!allowed) {
@@ -128,10 +109,6 @@ async function readPackage(pkg) {
     return pkg;
 }
 
-/**
- * Takes the wrapper's own footprint back out of the lockfile pnpm is about to
- * write. Never refuses: a checksum left in place is a nuisance, not a danger.
- */
 function afterAllResolved(lockfile) {
     try {
         if (PnpmChecksum.dropPhantom(lockfile)) {

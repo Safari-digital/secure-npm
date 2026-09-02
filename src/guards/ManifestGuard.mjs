@@ -115,6 +115,7 @@ export default class ManifestGuard {
                         rule: 'blocked-package',
                         subject: `${name}${alias} - package.json ▸ ${field}`,
                         reason,
+                        hint: Rules.BLOCKED_BY_NAME_HINT,
                     });
                     continue;
                 }

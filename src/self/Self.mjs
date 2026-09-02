@@ -169,6 +169,10 @@ export default class Self {
         this.#line(this.#OK, 'blocked managers', [...policy.blockedManagers.keys()].join(', ') || 'none');
         this.#line(this.#OK, 'blocked packages', `${policy.blockedPackages.length} pattern(s)`);
 
+        if (policy.blockedPackagesExclude.size) {
+            this.#line(this.#MEH, 'blocked packages waived', [...policy.blockedPackagesExclude].join(', '));
+        }
+
         this.#reportCompromisedList(policy, fail);
 
         this.#line(
@@ -292,6 +296,7 @@ export default class Self {
                     compromisedPackagesMaxStaleMinutes: policy.compromisedPackagesMaxStaleMinutes,
                     blockedManagers: Object.fromEntries(policy.blockedManagers),
                     blockedPackages: policy.blockedPackages.map(({ source, reason }) => ({ pattern: source, reason })),
+                    blockedPackagesExclude: [...policy.blockedPackagesExclude],
                     registries: policy.registries,
                 },
                 null,

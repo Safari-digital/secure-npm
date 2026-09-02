@@ -1,5 +1,3 @@
-/** Shared, I/O-free predicates - the hook, the wrappers and the auditor all decide the same way. */
-
 /** @typedef {import('./Policy.mjs').PolicyConfig} PolicyConfig **/
 
 const EXOTIC_SPECIFIER = /^(git(\+[a-z]+)?:|git@|https?:|github:|gitlab:|bitbucket:)/;
@@ -9,12 +7,9 @@ const HOSTED_PROVIDERS = { github: 'github.com', gitlab: 'gitlab.com', bitbucket
 const HOSTED_HOSTS = new Set(Object.values(HOSTED_PROVIDERS));
 
 export default class Rules {
-    /** Fields pnpm and npm actually install for third-party packages. **/
     static INSTALLED_FIELDS = ['dependencies', 'optionalDependencies'];
-    /** Adds the fields that only matter for manifests we author ourselves. **/
     static AUTHORED_FIELDS = [...this.INSTALLED_FIELDS, 'devDependencies'];
 
-    /** Ranges that resolve outside a registry - no publish date, no provenance. **/
     static isExoticSpecifier(specifier) {
         if (typeof specifier !== 'string') return false;
         if (LOCAL_SPECIFIER.test(specifier)) return false;
@@ -29,7 +24,6 @@ export default class Rules {
             .replace(/\.git$/i, '')
             .replace(/^\/+|\/+$/g, '');
 
-        // A ".." segment is the one thing that could make two identities collide.
         if (!cleaned || cleaned.split('/').includes('..')) return null;
 
         return `${host.toLowerCase()}/${cleaned.toLowerCase()}`;
@@ -49,7 +43,6 @@ export default class Rules {
         const shorthand = /^(github|gitlab|bitbucket):(.+)$/i.exec(specifier);
         if (shorthand) return this.#repositoryIdentity(HOSTED_PROVIDERS[shorthand[1].toLowerCase()], shorthand[2]);
 
-        // scp-like: git@host:owner/repo.git - a colon, not a protocol separator.
         if (!specifier.includes('://')) {
             const scp = /^[^@\s/]+@([^:/\s]+):(.+)$/.exec(specifier);
             return scp ? this.#repositoryIdentity(scp[1], scp[2]) : null;
@@ -61,7 +54,6 @@ export default class Rules {
         const [, scheme, authority, pathname] = url;
         const host = authority.slice(authority.lastIndexOf('@') + 1);
 
-        // A plain http(s) URL is a tarball unless the host is one npm always resolves as git.
         const isGit =
             /^(git|ssh)/i.test(scheme) || /\.git($|[#?])/i.test(specifier) || HOSTED_HOSTS.has(host.toLowerCase());
         if (!isGit) return null;
@@ -93,7 +85,6 @@ export default class Rules {
             : 'install it from a registry, or add the repository to "allowedGitSources" in policy.json';
     }
 
-    /** `alias@npm:target@range` hides the real name behind the key. **/
     static aliasTarget(specifier) {
         if (typeof specifier !== 'string' || !specifier.startsWith('npm:')) return null;
         const target = specifier.slice(4);
@@ -101,7 +92,6 @@ export default class Rules {
         return separator > 0 ? target.slice(0, separator) : target;
     }
 
-    /** Real package name behind a (key, range) pair, following any alias. **/
     static resolveName(key, specifier) {
         return this.aliasTarget(specifier) ?? key;
     }
@@ -115,6 +105,54 @@ export default class Rules {
         if (typeof name !== 'string') return null;
         return policy.blockedPackages.find(({ pattern }) => pattern.test(name))?.reason ?? null;
     }
+
+    /**
+     * @param {PolicyConfig} policy
+     * @param {string} name
+     * @param {string | null} [version]
+     */
+    static isBlockExempt(policy, name, version = null) {
+        if (typeof name !== 'string') return false;
+        if (policy.blockedPackagesExclude.has(name)) return true;
+        if (version) return policy.blockedPackagesExclude.has(`${name}@${version}`);
+
+        const prefix = `${name}@`;
+        for (const entry of policy.blockedPackagesExclude) if (entry.startsWith(prefix)) return true;
+
+        return false;
+    }
+
+    /**
+     * `blockedPackageReason` for a package that arrived as somebody else's
+     * dependency, which is the only thing `blockedPackagesExclude` waives.
+     * A package asked for by name - a command-line target, or a dependency of
+     * the manifest being installed - stays on `blockedPackageReason`: accepting
+     * what a dependency drags in is not the same decision as choosing to
+     * install the thing.
+     *
+     * That split is about intent rather than reach. A waived package still has
+     * to get past `blockedManagers` before anything can run it, and that list
+     * is untouched by this one.
+     *
+     * @param {PolicyConfig} policy
+     * @param {string} name
+     * @param {string | null} [version]
+     * @returns {string | null} The reason when the package is blocked.
+     */
+    static dependencyBlockReason(policy, name, version = null) {
+        const reason = this.blockedPackageReason(policy, name);
+        if (reason === null) return null;
+
+        return this.isBlockExempt(policy, name, version) ? null : reason;
+    }
+
+    static blockedPackageHint(name, version = null) {
+        const entry = version ? `${name}@${version}` : name;
+        return `add "${entry}" to "blockedPackagesExclude" in policy.json if this dependency is expected`;
+    }
+
+    static BLOCKED_BY_NAME_HINT =
+        '"blockedPackagesExclude" only covers a package pulled in as a dependency, which this one is not - edit "blockedPackages" in policy.json if it should be allowed outright';
 
     /**
      * @param {PolicyConfig} policy
@@ -145,7 +183,6 @@ export default class Rules {
         return policy.registries.default ?? null;
     }
 
-    /** True when a lockfile `resolved` URL points outside every configured registry. **/
     static isExoticResolution(policy, resolved) {
         if (typeof resolved !== 'string' || resolved === '') return false;
         if (resolved.startsWith('file:')) return false;

@@ -1,27 +1,16 @@
 {
-    "$comment": [
-        "Shared policy, versioned so every machine enforces the same rules.",
-        "Machine-specific overrides live outside this repository, in the overlay that",
-        "`secure-npm edit-policy` opens; it is shallow-merged on top of this file.",
-        "Editing this file changes nothing until `node install.mjs` redeploys it."
-    ],
-
     "minimumReleaseAgeMinutes": 4320,
-
     "minimumReleaseAgeExclude": [],
-
     "allowExoticSources": false,
 
     "$allowedGitSourcesComment": [
         "Exception list for git dependencies, consulted whenever allowExoticSources",
-        "is false. Entries are repositories written as host/owner/repo, matched at any",
-        "depth against the normalised form of every git specifier and every lockfile",
-        "resolution - github:owner/repo, git+ssh://git@github.com/owner/repo.git#sha and",
-        "https://github.com/owner/repo all reduce to github.com/owner/repo. A '*' stands",
-        "for exactly one path segment, so host/owner/* covers a whole organisation and",
-        "nothing beyond it. Refused sources print the exact string to add here.",
-        "Whitelisting a repository also exempts it from the release-age check: a commit",
-        "has no registry publish date, and the version it declares is not the registry's."
+        "is false. Entries are repositories written as host/owner/repo.",
+        "eg:",
+        "github:owner/repo",
+        "git+ssh://git@github.com/owner/repo.git#sha",
+        "github:owner/*",
+        "Whitelisting a repository also exempts it from the release-age check."
     ],
     "allowedGitSources": ["github.com/safari-digital/*"],
 
@@ -29,24 +18,13 @@
 
     "$trustPolicyComment": [
         "pnpm-only, and enforced natively by pnpm: refuses a version published with",
-        "weaker guarantees (provenance, trusted publisher) than an earlier one, which",
-        "is what a stolen publish token looks like. The comparison is by publish date",
-        "rather than semver, so a backport onto an old branch trips it; the ignore-after",
-        "window keeps the check on the recent releases where the risk actually is."
+        "weaker guarantees (provenance, trusted publisher) than an earlier one."
     ],
     "trustPolicy": "no-downgrade",
     "trustPolicyIgnoreAfterMinutes": 129600,
 
     "$compromisedPackagesComment": [
-        "Curated list of npm packages that are known to be malicious, maintained by",
-        "DataDog. Names on it are refused at any depth, on both managers, and",
-        "'secure-npm validate' audits an existing tree against the same list.",
-        "https://github.com/DataDog/malicious-software-packages-dataset",
-        "",
-        "The list is cached, and refreshed once it is older than the refresh window.",
-        "When a refresh fails the cached copy is used and announced, up to the",
-        "max-stale window; past that an install is refused rather than run",
-        "unchecked. Setting the source to \"\" switches the check off entirely."
+        "Curated list of npm packages that are known to be malicious, maintained by DataDog."
     ],
     "compromisedPackagesSource": "https://raw.githubusercontent.com/DataDog/malicious-software-packages-dataset/refs/heads/main/samples/npm/manifest.json",
     "compromisedPackagesRefreshMinutes": 360,
@@ -70,6 +48,16 @@
         { "pattern": "^deno$", "reason": "deno runtime" },
         { "pattern": "^@deno/", "reason": "deno platform binaries" }
     ],
+
+    "$blockedPackagesExcludeComment": [
+        "Exception list for blockedPackages, as `name` or `name@version` - exact",
+        "strings, not patterns.",
+        "",
+        "It only covers a package that arrived as somebody else's dependency. A command-line",
+        "target and a dependency written into the local package.json are still refused",
+        "Waiving a package manager here does not make it runnable."
+    ],
+    "blockedPackagesExclude": [],
 
     "registries": {
         "default": "https://registry.npmjs.org/",

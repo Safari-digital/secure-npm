@@ -119,21 +119,22 @@ secure-npm --uninstall   # remove everything the installer put in place
 
 ## Configuration
 
-| Key                                  | Meaning                                                                                                                                                          |
-|--------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `minimumReleaseAgeMinutes`           | how long a version must have existed (default 4320 = 3 days)                                                                                                     |
-| `minimumReleaseAgeExclude`           | `name` or `name@version` entries exempt from the age check                                                                                                       |
-| `trustPolicy`                        | pnpm only, `no-downgrade` or `off`                                                                                                                               |
-| `trustPolicyIgnoreAfterMinutes`      | only check versions younger than this (default 90 days)                                                                                                          |
-| `allowExoticSources`                 | permit `git:` / tarball dependencies                                                                                                                             |
-| `allowedGitSources`                  | git repositories exempt from that, as `host/owner/repo`, `*` matching one path segment. Also exempt from the release-age check, which a commit has no answer for |
-| `forceIgnoreScripts`                 | disable lifecycle scripts at install time                                                                                                                        |
-| `compromisedPackagesSource`          | the malicious-package list every install is checked against. `""` switches the check off                                                                         |
-| `compromisedPackagesRefreshMinutes`  | how long a fetched copy is used before it is refreshed (default 360 = 6 hours)                                                                                   |
-| `compromisedPackagesMaxStaleMinutes` | how long a copy may still be used once a refresh has failed, after which installs are refused (default 10080 = 7 days)                                           |
-| `blockedManagers`                    | commands the shims refuse outright                                                                                                                               |
-| `blockedPackages`                    | name patterns refused at any depth, on both managers                                                                                                             |
-| `registries`                         | approved registries per scope, an unlisted scope fails closed                                                                                                    |
+| Key                                  | Meaning                                                                                                                                       |
+|--------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------|
+| `minimumReleaseAgeMinutes`           | how long a version must have existed (default 4320 = 3 days)                                                                                  |
+| `minimumReleaseAgeExclude`           | `name` or `name@version` entries exempt from the age check                                                                                    |
+| `trustPolicy`                        | pnpm only, `no-downgrade` or `off`                                                                                                            |
+| `trustPolicyIgnoreAfterMinutes`      | only check versions younger than this (default 90 days)                                                                                       |
+| `allowExoticSources`                 | permit `git:` / tarball dependencies                                                                                                          |
+| `allowedGitSources`                  | git repositories exempt from that, as `host/owner/repo`, `*` matching one path segment. Also exempt from the release-age check                |
+| `forceIgnoreScripts`                 | disable lifecycle scripts at install time                                                                                                     |
+| `compromisedPackagesSource`          | the malicious-package list every install is checked against. `""` switches the check off                                                      |
+| `compromisedPackagesRefreshMinutes`  | how long a fetched copy is used before it is refreshed (default 360 = 6 hours)                                                                |
+| `compromisedPackagesMaxStaleMinutes` | how long a copy may still be used once a refresh has failed, after which installs are refused (default 10080 = 7 days)                        |
+| `blockedManagers`                    | commands the shims refuse outright                                                                                                            |
+| `blockedPackages`                    | name patterns refused at any depth, on both managers                                                                                          |
+| `blockedPackagesExclude`             | `name` or `name@version` entries exempt from that, and only where the package arrived as a dependency. Asking for it by name is still refused |
+| `registries`                         | approved registries per scope, an unlisted scope fails closed                                                                                 |
 
 ## Uninstall
 

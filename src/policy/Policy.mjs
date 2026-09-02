@@ -14,6 +14,7 @@ import { LOCAL_POLICY_FILE, POLICY_FILE } from '../paths.mjs';
  * @property {number} compromisedPackagesRefreshMinutes
  * @property {number} compromisedPackagesMaxStaleMinutes
  * @property {{ pattern: RegExp, source: string, reason: string }[]} blockedPackages
+ * @property {Set<string>} blockedPackagesExclude
  * @property {Map<string, string>} blockedManagers
  * @property {Object<string, string>} registries
  * @property {number} logRetentionDays
@@ -73,11 +74,11 @@ export default class Policy {
             forceIgnoreScripts: raw.forceIgnoreScripts !== false,
             trustPolicy: raw.trustPolicy ?? 'no-downgrade',
             trustPolicyIgnoreAfterMinutes: raw.trustPolicyIgnoreAfterMinutes ?? 129600,
-            // An empty source switches the check off, like a zero minimumReleaseAge.
             compromisedPackagesSource: raw.compromisedPackagesSource || null,
             compromisedPackagesRefreshMinutes: raw.compromisedPackagesRefreshMinutes ?? 360,
             compromisedPackagesMaxStaleMinutes: raw.compromisedPackagesMaxStaleMinutes ?? 10080,
             blockedPackages,
+            blockedPackagesExclude: new Set(raw.blockedPackagesExclude ?? []),
             blockedManagers,
             registries: raw.registries ?? { default: 'https://registry.npmjs.org/' },
             logRetentionDays: raw.logRetentionDays ?? 90,
